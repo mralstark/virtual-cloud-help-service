@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -13,16 +14,30 @@ import (
 )
 
 func LoadPrivate(path string) (ed25519.PrivateKey, error) {
-	info, err := os.Stat(path)
+	if runtime.GOOS != "linux" {
+		return nil, errors.New("signing key loading is supported only on Linux")
+	}
+	file, err := os.Open(path)
+	if err != nil {
+		return nil, fmt.Errorf("open signing key: %w", err)
+	}
+	defer file.Close()
+	info, err := file.Stat()
 	if err != nil {
 		return nil, fmt.Errorf("stat signing key: %w", err)
 	}
-	if runtime.GOOS != "windows" && info.Mode().Perm()&0o077 != 0 {
+	if !info.Mode().IsRegular() {
+		return nil, errors.New("signing key must be a regular file")
+	}
+	if info.Mode().Perm()&0o077 != 0 {
 		return nil, errors.New("signing key permissions must not allow group or other access")
 	}
-	encoded, err := os.ReadFile(path)
+	encoded, err := io.ReadAll(io.LimitReader(file, 257))
 	if err != nil {
 		return nil, fmt.Errorf("read signing key: %w", err)
+	}
+	if len(encoded) == 0 || len(encoded) > 256 {
+		return nil, errors.New("signing key size is invalid")
 	}
 	raw, err := base64.RawURLEncoding.DecodeString(strings.TrimSpace(string(encoded)))
 	if err != nil {
@@ -39,6 +54,9 @@ func LoadPrivate(path string) (ed25519.PrivateKey, error) {
 }
 
 func GenerateFiles(privatePath, publicPath string) (ed25519.PublicKey, error) {
+	if runtime.GOOS != "linux" {
+		return nil, errors.New("signing key generation is supported only on Linux; use WSL for development")
+	}
 	if privatePath == "" || publicPath == "" {
 		return nil, errors.New("private and public output paths are required")
 	}
@@ -69,11 +87,18 @@ func GenerateFiles(privatePath, publicPath string) (ed25519.PublicKey, error) {
 
 func ensureParent(path string, mode os.FileMode) error {
 	parent := filepath.Dir(path)
-	if parent == "." {
-		return nil
-	}
 	if err := os.MkdirAll(parent, mode); err != nil {
 		return fmt.Errorf("create key directory: %w", err)
+	}
+	info, err := os.Stat(parent)
+	if err != nil {
+		return fmt.Errorf("stat key directory: %w", err)
+	}
+	if !info.IsDir() {
+		return errors.New("key parent must be a directory")
+	}
+	if info.Mode().Perm()&0o022 != 0 {
+		return errors.New("key directory must not be writable by group or others")
 	}
 	return nil
 }
@@ -83,9 +108,23 @@ func writeExclusive(path string, contents []byte, mode os.FileMode) error {
 	if err != nil {
 		return err
 	}
+	succeeded := false
+	defer func() {
+		if !succeeded {
+			_ = os.Remove(path)
+		}
+	}()
 	if _, err := file.Write(contents); err != nil {
 		_ = file.Close()
 		return err
 	}
-	return file.Close()
+	if err := file.Sync(); err != nil {
+		_ = file.Close()
+		return err
+	}
+	if err := file.Close(); err != nil {
+		return err
+	}
+	succeeded = true
+	return nil
 }

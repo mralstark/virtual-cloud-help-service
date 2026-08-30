@@ -32,19 +32,25 @@ func run(logger *log.Logger) error {
 	if err != nil {
 		return err
 	}
-	issuer := service.Issuer{
+	issuer, err := service.NewIssuer(service.IssuerOptions{
 		CatalogPath: cfg.CatalogPath,
+		StatePath:   cfg.IssuerStatePath,
 		TTL:         cfg.ManifestTTL,
+		CacheFor:    cfg.ManifestCache,
 		PrivateKey:  privateKey,
 		Now:         time.Now,
+	})
+	if err != nil {
+		return err
 	}
+	defer issuer.Close()
 	if _, err := issuer.Issue(); err != nil {
 		return err
 	}
 
 	server := &http.Server{
 		Addr:              cfg.ListenAddress,
-		Handler:           api.New(issuer.Issue, logger),
+		Handler:           api.New(issuer.Issue, logger, cfg.MaxInFlight),
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       10 * time.Second,
 		WriteTimeout:      10 * time.Second,

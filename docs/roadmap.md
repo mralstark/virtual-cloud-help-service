@@ -6,7 +6,10 @@
 - [x] Define a signed public endpoint manifest.
 - [x] Add a minimal HTTP control-plane process and key generator.
 - [x] Add initial PostgreSQL entities without traffic-history fields.
-- [ ] Complete external review of the manifest and key-rotation design.
+- [x] Add bounded decoding and an initial security review of manifest issuance.
+- [x] Persist monotonic issuer state and reject rollback/equivocation.
+- [x] Sign discovery mirrors and add pinned-key sequential fallback.
+- [ ] Complete an independent external review and key-rotation ceremony design.
 
 Exit criterion: CI validates the manifest against tampering and expiry; no secret is
 required to build or test the repository.
@@ -45,9 +48,12 @@ the control plane can be restored from an encrypted backup.
 
 ## Milestone 4 — client orchestration and operations
 
-- [ ] Verify manifests, reject replay/downgrade, and keep last-known-good state.
-- [ ] Score endpoints using handshake plus bidirectional transfer.
-- [ ] Add bounded fallback with jitter/backoff and no aggressive address scanning.
+- [x] Provide a verification library that rejects replay/downgrade/equivocation.
+- [ ] Persist trusted state in each supported OS secure store.
+- [x] Add a pure endpoint planner for transfer observations and ASN diversity.
+- [ ] Integrate real handshake plus randomized bidirectional transfer probes.
+- [x] Add bounded sequential fallback and exponential cooldown primitives.
+- [ ] Add platform entropy-backed retry jitter in each client.
 - [ ] Add runbooks, alerts, canary updates, and a blocked-node replacement workflow.
 - [ ] Run failure exercises for UDP loss, blocked IP, DNS failure, and control-plane
   outage.

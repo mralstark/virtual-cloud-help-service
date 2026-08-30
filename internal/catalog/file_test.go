@@ -7,20 +7,20 @@ import (
 )
 
 func TestLoadFile(t *testing.T) {
-	path := writeCatalog(t, `{"version":1,"nodes":[]}`)
+	path := writeCatalog(t, `{"revision":1,"discovery":[],"nodes":[]}`)
 	catalog, err := LoadFile(path)
 	if err != nil {
 		t.Fatalf("LoadFile() error = %v", err)
 	}
-	if catalog.Version != 1 {
-		t.Fatalf("Version = %d, want 1", catalog.Version)
+	if catalog.Revision != 1 {
+		t.Fatalf("Revision = %d, want 1", catalog.Revision)
 	}
 }
 
 func TestLoadFileRejectsUnknownAndTrailingData(t *testing.T) {
 	tests := []string{
-		`{"version":1,"nodes":[],"secret":"must-not-be-ignored"}`,
-		`{"version":1,"nodes":[]} {"version":2,"nodes":[]}`,
+		`{"revision":1,"discovery":[],"nodes":[],"secret":"must-not-be-ignored"}`,
+		`{"revision":1,"discovery":[],"nodes":[]} {"revision":2,"discovery":[],"nodes":[]}`,
 	}
 	for _, contents := range tests {
 		path := writeCatalog(t, contents)
