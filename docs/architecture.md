@@ -53,9 +53,23 @@ private key or control-plane database credentials.
 }
 ```
 
-The decoded payload is schema version 1 and contains an increasing catalog version,
-issuance/expiry timestamps, and public endpoints. `credential_ref` names credentials
-already provisioned to one device; the manifest never carries a device private key.
+The decoded payload is schema version 2 and contains a durable issuer version, an
+operator-controlled catalog revision, issuance/expiry timestamps, signed discovery
+mirrors, provider/ASN metadata, and public endpoints. `credential_ref` names
+credentials already provisioned to one device; the manifest never carries a device
+private key.
+
+The issuer records the highest version, catalog revision and canonical catalog
+digest before publishing an envelope. It rejects a lower revision, changed contents
+at the same revision, a backwards clock, or a signing key that does not match the
+state file. Clients persist the highest accepted version, issuance time, and exact
+payload digest. The same bytes may arrive from multiple mirrors; different bytes at
+the same version are rejected.
+
+The current file store takes a non-blocking Linux process lock for the issuer's full
+lifetime so two local processes cannot allocate the same next version. It supports
+one active replica only. A future HA deployment must replace it with a transactional
+compare-and-swap state store; a shared network filesystem is not sufficient.
 
 The current encoder uses a Go struct without maps, giving deterministic field order.
 The signature is over the exact decoded payload bytes. Future schema changes must
@@ -64,8 +78,11 @@ define canonicalization explicitly or keep signing opaque payload bytes.
 ## Availability behavior
 
 - `/healthz` proves only that the process is alive.
-- `/readyz` reloads, validates, and signs the current catalog.
-- `/v1/manifest` repeats that operation and returns `503` on invalid configuration.
+- `/readyz` validates that the issuer can return a current envelope.
+- `/v1/manifest` returns the cached envelope and refreshes it at a bounded interval.
+- Refreshes are serialized, persisted before publish, and protected by an HTTP
+  concurrency limit. A transient catalog error keeps only a still-unexpired cached
+  envelope.
 - Responses use `Cache-Control: no-store`; a later CDN/edge design must preserve
   expiry semantics and must not rewrite the signed payload.
 - The application deliberately omits access logging. Aggregate edge metrics must be
@@ -77,6 +94,7 @@ define canonicalization explicitly or keep signing opaque payload bytes.
 - PostgreSQL repository code;
 - data-plane provisioning;
 - transport-specific credential issuance;
-- client health scoring and failover;
+- integration of the endpoint planner with an end-user client and real transfer
+  probes;
 - revocation delivery and signing-key rotation;
 - multi-region probes and privacy-preserving telemetry.

@@ -4,6 +4,7 @@ import (
 	"crypto/ed25519"
 	"crypto/rand"
 	"encoding/base64"
+	"strings"
 	"testing"
 	"time"
 )
@@ -11,16 +12,22 @@ import (
 func TestIssueAndVerifyRoundTrip(t *testing.T) {
 	publicKey, privateKey := testKey(t)
 	now := time.Date(2026, 8, 30, 12, 0, 0, 0, time.UTC)
-	envelope, err := Issue(testCatalog(), now, 15*time.Minute, privateKey)
+	envelope, err := Issue(testCatalog(), 42, now, 15*time.Minute, privateKey)
 	if err != nil {
 		t.Fatalf("Issue() error = %v", err)
 	}
-	document, err := Verify(envelope, publicKey, now.Add(time.Minute), 1)
+	document, state, err := Verify(envelope, publicKey, now.Add(time.Minute), TrustedState{})
 	if err != nil {
 		t.Fatalf("Verify() error = %v", err)
 	}
-	if document.Version != 7 {
-		t.Fatalf("Version = %d, want 7", document.Version)
+	if document.Version != 42 || state.Version != 42 {
+		t.Fatalf("versions = document %d state %d, want 42", document.Version, state.Version)
+	}
+	if document.CatalogRevision != 7 {
+		t.Fatalf("CatalogRevision = %d, want 7", document.CatalogRevision)
+	}
+	if got := document.Discovery[0].ID; got != "control-primary" {
+		t.Fatalf("canonical first discovery = %q, want control-primary", got)
 	}
 	if got := document.Nodes[0].ID; got != "node-a" {
 		t.Fatalf("canonical first node = %q, want node-a", got)
@@ -31,12 +38,20 @@ func TestIssueAndVerifyRoundTrip(t *testing.T) {
 	if envelope.KeyID != KeyID(publicKey) {
 		t.Fatalf("KeyID = %q, want %q", envelope.KeyID, KeyID(publicKey))
 	}
+
+	_, sameState, err := Verify(envelope, publicKey, now.Add(2*time.Minute), state)
+	if err != nil {
+		t.Fatalf("Verify() exact mirrored payload error = %v", err)
+	}
+	if sameState != state {
+		t.Fatal("exact mirrored payload unexpectedly changed trusted state")
+	}
 }
 
 func TestVerifyRejectsTamperedPayload(t *testing.T) {
 	publicKey, privateKey := testKey(t)
 	now := time.Date(2026, 8, 30, 12, 0, 0, 0, time.UTC)
-	envelope, err := Issue(testCatalog(), now, 15*time.Minute, privateKey)
+	envelope, err := Issue(testCatalog(), 1, now, 15*time.Minute, privateKey)
 	if err != nil {
 		t.Fatalf("Issue() error = %v", err)
 	}
@@ -46,23 +61,88 @@ func TestVerifyRejectsTamperedPayload(t *testing.T) {
 	}
 	payload[len(payload)/2] ^= 1
 	envelope.Payload = base64.RawURLEncoding.EncodeToString(payload)
-	if _, err := Verify(envelope, publicKey, now, 1); err == nil {
+	if _, _, err := Verify(envelope, publicKey, now, TrustedState{}); err == nil {
 		t.Fatal("Verify() accepted a tampered payload")
 	}
 }
 
-func TestVerifyRejectsExpiredAndRolledBackManifest(t *testing.T) {
+func TestVerifyRejectsExpiredRollbackAndEquivocation(t *testing.T) {
 	publicKey, privateKey := testKey(t)
 	now := time.Date(2026, 8, 30, 12, 0, 0, 0, time.UTC)
-	envelope, err := Issue(testCatalog(), now, 5*time.Minute, privateKey)
+	current, err := Issue(testCatalog(), 7, now, 5*time.Minute, privateKey)
 	if err != nil {
-		t.Fatalf("Issue() error = %v", err)
+		t.Fatal(err)
 	}
-	if _, err := Verify(envelope, publicKey, now.Add(5*time.Minute), 1); err == nil {
+	_, trusted, err := Verify(current, publicKey, now.Add(time.Minute), TrustedState{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := Verify(current, publicKey, now.Add(5*time.Minute), TrustedState{}); err == nil {
 		t.Fatal("Verify() accepted an expired manifest")
 	}
-	if _, err := Verify(envelope, publicKey, now.Add(time.Minute), 8); err == nil {
-		t.Fatal("Verify() accepted a manifest below the minimum version")
+
+	older, err := Issue(testCatalog(), 6, now.Add(time.Minute), 5*time.Minute, privateKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := Verify(older, publicKey, now.Add(2*time.Minute), trusted); err == nil {
+		t.Fatal("Verify() accepted a version rollback")
+	}
+
+	equivocation, err := Issue(testCatalog(), 7, now.Add(time.Minute), 5*time.Minute, privateKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := Verify(equivocation, publicKey, now.Add(2*time.Minute), trusted); err == nil {
+		t.Fatal("Verify() accepted different payload bytes at the same version")
+	}
+}
+
+func TestVerifyBoundsEncodedFieldsBeforeDecode(t *testing.T) {
+	publicKey, _ := testKey(t)
+	envelope := Envelope{
+		Algorithm: Algorithm,
+		KeyID:     KeyID(publicKey),
+		Payload:   strings.Repeat("A", base64.RawURLEncoding.EncodedLen(maxManifestBytes)+1),
+		Signature: strings.Repeat("A", base64.RawURLEncoding.EncodedLen(ed25519.SignatureSize)),
+	}
+	if _, _, err := Verify(envelope, publicKey, time.Now(), TrustedState{}); err == nil {
+		t.Fatal("Verify() accepted an oversized encoded payload")
+	}
+}
+
+func TestDecodeEnvelopeBoundsOuterResponse(t *testing.T) {
+	oversized := strings.Repeat("x", base64.RawURLEncoding.EncodedLen(maxManifestBytes)+1025)
+	if _, err := DecodeEnvelope(strings.NewReader(oversized)); err == nil {
+		t.Fatal("DecodeEnvelope() accepted an oversized response")
+	}
+	if _, err := DecodeEnvelope(strings.NewReader(`{"algorithm":"Ed25519","key_id":"k","payload":"p","signature":"s","unknown":true}`)); err == nil {
+		t.Fatal("DecodeEnvelope() accepted an unknown field")
+	}
+}
+
+func TestCatalogDigestIsCanonicalAndDetectsChange(t *testing.T) {
+	catalog := testCatalog()
+	first, err := CatalogDigest(catalog)
+	if err != nil {
+		t.Fatal(err)
+	}
+	catalog.Nodes[0], catalog.Nodes[1] = catalog.Nodes[1], catalog.Nodes[0]
+	catalog.Discovery[0], catalog.Discovery[1] = catalog.Discovery[1], catalog.Discovery[0]
+	second, err := CatalogDigest(catalog)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first != second {
+		t.Fatal("canonical digest changed only because input order changed")
+	}
+	catalog.Nodes[0].Region = "eu-change"
+	changed, err := CatalogDigest(catalog)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first == changed {
+		t.Fatal("catalog digest did not change with catalog contents")
 	}
 }
 
@@ -70,7 +150,7 @@ func TestIssueRejectsInvalidEndpoint(t *testing.T) {
 	_, privateKey := testKey(t)
 	catalog := testCatalog()
 	catalog.Nodes[0].Endpoints[0].Address = "missing-port"
-	if _, err := Issue(catalog, time.Now(), 15*time.Minute, privateKey); err == nil {
+	if _, err := Issue(catalog, 1, time.Now(), 15*time.Minute, privateKey); err == nil {
 		t.Fatal("Issue() accepted an endpoint without a port")
 	}
 }
@@ -86,12 +166,18 @@ func testKey(t *testing.T) (ed25519.PublicKey, ed25519.PrivateKey) {
 
 func testCatalog() Catalog {
 	return Catalog{
-		Version: 7,
+		Revision: 7,
+		Discovery: []DiscoveryEndpoint{
+			{ID: "control-backup", URL: "https://203.0.113.10/v1/manifest", Priority: 20},
+			{ID: "control-primary", URL: "https://control.example/v1/manifest", Priority: 10},
+		},
 		Nodes: []Node{
 			{
 				ID:          "node-b",
 				Region:      "eu-west",
 				CountryCode: "DE",
+				Provider:    "provider-b",
+				ASN:         64502,
 				Endpoints: []Endpoint{
 					{ID: "node-b-reality", Transport: TransportReality, Address: "vpn-b.example:443", ServerName: "cover.example", CredentialRef: "reality-main", Priority: 20},
 					{ID: "node-b-awg", Transport: TransportAmneziaWG, Address: "vpn-b.example:51820", CredentialRef: "awg-main", Priority: 10},
@@ -101,6 +187,8 @@ func testCatalog() Catalog {
 				ID:          "node-a",
 				Region:      "eu-north",
 				CountryCode: "FI",
+				Provider:    "provider-a",
+				ASN:         64501,
 				Endpoints: []Endpoint{
 					{ID: "node-a-awg", Transport: TransportAmneziaWG, Address: "vpn-a.example:51820", CredentialRef: "awg-main", Priority: 10},
 				},

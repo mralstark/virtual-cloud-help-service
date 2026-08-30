@@ -1,10 +1,24 @@
 {
-  "version": 1,
+  "revision": 1,
+  "discovery": [
+    {
+      "id": "control-primary",
+      "url": "https://control.example.invalid/v1/manifest",
+      "priority": 10
+    },
+    {
+      "id": "control-backup",
+      "url": "https://203.0.113.10/v1/manifest",
+      "priority": 20
+    }
+  ],
   "nodes": [
     {
       "id": "example-eu-1",
       "region": "eu-test",
       "country_code": "NL",
+      "provider": "example-provider",
+      "asn": 64496,
       "endpoints": [
         {
           "id": "example-eu-1-awg",
