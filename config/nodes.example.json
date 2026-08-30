@@ -1,0 +1,27 @@
+{
+  "version": 1,
+  "nodes": [
+    {
+      "id": "example-eu-1",
+      "region": "eu-test",
+      "country_code": "NL",
+      "endpoints": [
+        {
+          "id": "example-eu-1-awg",
+          "transport": "amneziawg",
+          "address": "vpn1.example.invalid:51820",
+          "credential_ref": "device-awg-primary",
+          "priority": 10
+        },
+        {
+          "id": "example-eu-1-reality",
+          "transport": "vless-reality",
+          "address": "vpn1.example.invalid:443",
+          "server_name": "cover.example.invalid",
+          "credential_ref": "device-reality-primary",
+          "priority": 20
+        }
+      ]
+    }
+  ]
+}
