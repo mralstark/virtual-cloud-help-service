@@ -22,14 +22,14 @@ Node pool B / ASN B  <----- encrypted user traffic ----->  independent fallback
 
 ### Control plane
 
-Owns accounts, public device keys, revocation state, public node inventory, and the
-offline-capable manifest signing key. It does not forward user traffic. In the
-bootstrap implementation it reads a public catalog from disk and emits an
-Ed25519-signed envelope.
+Owns accounts, public device keys, revocation state, public node inventory, and one
+online manifest signing key. It never receives the offline root private key and does
+not forward user traffic. In the bootstrap implementation it reads a public catalog
+and root-signed key policy from disk and emits an Ed25519-signed envelope.
 
 ### Client orchestrator
 
-Pins one or more manifest public keys. It rejects invalid, expired, downgraded, or
+Pins one offline root public key. It rejects invalid, expired, downgraded, or
 replayed manifests; stores per-device transport credentials in the OS secret store;
 and measures both handshake and bidirectional data transfer before declaring an
 endpoint healthy.
@@ -47,24 +47,25 @@ private key or control-plane database credentials.
 ```json
 {
   "algorithm": "Ed25519",
-  "key_id": "base64url-sha256-public-key-prefix",
+  "key_id": "base64url-sha256-public-key",
   "payload": "base64url-encoded-canonical-json",
   "signature": "base64url-ed25519-signature"
 }
 ```
 
-The decoded payload is schema version 2 and contains a durable issuer version, an
+The decoded payload is schema version 3 and contains a durable issuer version, an
 operator-controlled catalog revision, issuance/expiry timestamps, signed discovery
-mirrors, provider/ASN metadata, and public endpoints. `credential_ref` names
-credentials already provisioned to one device; the manifest never carries a device
-private key.
+mirrors, an offline-root-signed online-key policy, provider/ASN metadata, and public
+endpoints. `credential_ref` names credentials already provisioned to one device; the
+manifest never carries a device private key.
 
-The issuer records the highest version, catalog revision and canonical catalog
-digest before publishing an envelope. It rejects a lower revision, changed contents
-at the same revision, a backwards clock, or a signing key that does not match the
-state file. Clients persist the highest accepted version, issuance time, and exact
-payload digest. The same bytes may arrive from multiple mirrors; different bytes at
-the same version are rejected.
+The issuer records the highest manifest and key-policy versions, both canonical
+digests, the signing-key epoch, catalog revision, and issuance time before publishing
+an envelope. It rejects a lower or same-version-changed policy, an unauthorized key,
+a backwards clock, a catalog rollback, or a changed catalog at the same revision.
+Clients pin only the offline root public key and persist the corresponding accepted
+state. The same bytes may arrive from multiple mirrors; different bytes at the same
+version are rejected.
 
 The current file store takes a non-blocking Linux process lock for the issuer's full
 lifetime so two local processes cannot allocate the same next version. It supports
@@ -96,5 +97,5 @@ define canonicalization explicitly or keep signing opaque payload bytes.
 - transport-specific credential issuance;
 - integration of the endpoint planner with an end-user client and real transfer
   probes;
-- revocation delivery and signing-key rotation;
+- revocation delivery and offline-root rotation/recovery;
 - multi-region probes and privacy-preserving telemetry.

@@ -9,7 +9,8 @@
 - [x] Add bounded decoding and an initial security review of manifest issuance.
 - [x] Persist monotonic issuer state and reject rollback/equivocation.
 - [x] Sign discovery mirrors and add pinned-key sequential fallback.
-- [ ] Complete an independent external review and key-rotation ceremony design.
+- [x] Add offline-root-signed, non-overlapping online signing-key epochs.
+- [ ] Complete an independent external review and root-key recovery ceremony.
 
 Exit criterion: CI validates the manifest against tampering and expiry; no secret is
 required to build or test the repository.
@@ -41,7 +42,7 @@ failures are classified rather than shown as a generic connection error.
 - [ ] Accept client-generated public keys; never upload device private keys.
 - [ ] Issue per-device transport credentials.
 - [ ] Revoke one device without rotating every other user.
-- [ ] Add signed manifest key rotation with an overlap window.
+- [x] Add signed online manifest-key rotation with a policy propagation window.
 
 Exit criterion: a lost device can be revoked without interrupting other devices, and
 the control plane can be restored from an encrypted backup.

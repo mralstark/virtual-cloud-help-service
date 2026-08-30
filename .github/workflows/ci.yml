@@ -30,6 +30,6 @@ jobs:
       - name: Check known Go vulnerabilities
         run: go run golang.org/x/vuln/cmd/govulncheck@v1.1.4 ./...
       - name: Build commands
-        run: go build -trimpath ./cmd/control-plane ./cmd/manifest-keygen
+        run: go build -trimpath ./cmd/control-plane ./cmd/manifest-keygen ./cmd/manifest-key-policy
       - name: Build pinned container
         run: docker build --pull=false .

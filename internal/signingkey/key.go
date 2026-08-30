@@ -1,6 +1,7 @@
 package signingkey
 
 import (
+	"bytes"
 	"crypto/ed25519"
 	"crypto/rand"
 	"encoding/base64"
@@ -47,10 +48,41 @@ func LoadPrivate(path string) (ed25519.PrivateKey, error) {
 	case ed25519.SeedSize:
 		return ed25519.NewKeyFromSeed(raw), nil
 	case ed25519.PrivateKeySize:
-		return ed25519.PrivateKey(append([]byte(nil), raw...)), nil
+		privateKey := ed25519.PrivateKey(append([]byte(nil), raw...))
+		if !bytes.Equal(ed25519.NewKeyFromSeed(privateKey[:ed25519.SeedSize]), privateKey) {
+			return nil, errors.New("signing key public half does not match its seed")
+		}
+		return privateKey, nil
 	default:
 		return nil, fmt.Errorf("signing key has %d bytes, expected %d-byte seed or %d-byte private key", len(raw), ed25519.SeedSize, ed25519.PrivateKeySize)
 	}
+}
+
+func LoadPublic(path string) (ed25519.PublicKey, error) {
+	file, err := os.Open(path)
+	if err != nil {
+		return nil, fmt.Errorf("open public key: %w", err)
+	}
+	defer file.Close()
+	info, err := file.Stat()
+	if err != nil {
+		return nil, fmt.Errorf("stat public key: %w", err)
+	}
+	if !info.Mode().IsRegular() {
+		return nil, errors.New("public key must be a regular file")
+	}
+	encoded, err := io.ReadAll(io.LimitReader(file, 129))
+	if err != nil {
+		return nil, fmt.Errorf("read public key: %w", err)
+	}
+	if len(encoded) == 0 || len(encoded) > 128 {
+		return nil, errors.New("public key size is invalid")
+	}
+	raw, err := base64.RawURLEncoding.DecodeString(strings.TrimSpace(string(encoded)))
+	if err != nil || len(raw) != ed25519.PublicKeySize {
+		return nil, errors.New("public key encoding is invalid")
+	}
+	return ed25519.PublicKey(append([]byte(nil), raw...)), nil
 }
 
 func GenerateFiles(privatePath, publicPath string) (ed25519.PublicKey, error) {

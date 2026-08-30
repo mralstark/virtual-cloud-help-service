@@ -1,6 +1,8 @@
 package selector
 
 import (
+	"crypto/ed25519"
+	"crypto/rand"
 	"testing"
 	"time"
 
@@ -9,7 +11,7 @@ import (
 
 func TestRankRespectsUDPBackoffAndDiversity(t *testing.T) {
 	now := time.Date(2026, 8, 30, 12, 0, 0, 0, time.UTC)
-	document := selectorDocument(now)
+	document := selectorDocument(t, now)
 	observations := map[string]Observation{
 		"a-reality": {CooldownUntil: now.Add(time.Minute)},
 	}
@@ -35,7 +37,7 @@ func TestRankRespectsUDPBackoffAndDiversity(t *testing.T) {
 
 func TestRankPrefersProviderAndASNDiversity(t *testing.T) {
 	now := time.Date(2026, 8, 30, 12, 0, 0, 0, time.UTC)
-	plan, err := Rank(selectorDocument(now), nil, now, Options{UDPAvailable: true, MaxCandidates: 3})
+	plan, err := Rank(selectorDocument(t, now), nil, now, Options{UDPAvailable: true, MaxCandidates: 3})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -53,7 +55,7 @@ func TestRankDoesNotTradeHealthForDiversity(t *testing.T) {
 		"b-reality": {ConsecutiveFailures: 1},
 		"c-reality": {ConsecutiveFailures: 1},
 	}
-	plan, err := Rank(selectorDocument(now), observations, now, Options{UDPAvailable: true, MaxCandidates: 2})
+	plan, err := Rank(selectorDocument(t, now), observations, now, Options{UDPAvailable: true, MaxCandidates: 2})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -76,10 +78,27 @@ func TestCooldownIsExponentialAndCapped(t *testing.T) {
 	}
 }
 
-func selectorDocument(now time.Time) manifest.Document {
+func selectorDocument(t *testing.T, now time.Time) manifest.Document {
+	t.Helper()
+	signingPublicKey, _, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, rootPrivateKey, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	grant, err := manifest.NewKeyGrant(signingPublicKey, 1, 1, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	keyPolicy, err := manifest.SignKeyPolicy(rootPrivateKey, 1, []manifest.KeyGrant{grant})
+	if err != nil {
+		t.Fatal(err)
+	}
 	return manifest.Document{
 		SchemaVersion: manifest.SchemaVersion, Version: 1, CatalogRevision: 1,
-		IssuedAt: now, ExpiresAt: now.Add(15 * time.Minute),
+		IssuedAt: now, ExpiresAt: now.Add(15 * time.Minute), KeyPolicy: keyPolicy,
 		Discovery: []manifest.DiscoveryEndpoint{{ID: "control", URL: "https://control.example/v1/manifest", Priority: 10}},
 		Nodes: []manifest.Node{
 			{

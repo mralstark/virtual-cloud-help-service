@@ -25,23 +25,28 @@ This repository is not a TUF implementation and must not claim TUF compatibility
    skip a version but cannot safely reuse one.
 4. A Linux advisory lock is held for the entire issuer lifetime. The file-backed
    implementation is single-active and is not an HA coordination mechanism.
-5. Signed payloads carry one to sixteen HTTPS discovery mirrors. Clients bootstrap
-   with at least one built-in URL and one or more pinned Ed25519 public keys, then
-   retain the last-known-good signed mirror set.
-6. The client bounds the complete envelope and encoded fields before Base64 decode,
+5. Clients pin one offline Ed25519 root public key. That root signs a monotonically
+   versioned policy containing contiguous, non-overlapping version grants for online
+   manifest signing keys. The root private key never reaches the control plane.
+6. Signed payloads carry one to sixteen HTTPS discovery mirrors. Clients bootstrap
+   with at least one built-in URL, then retain the last-known-good signed mirror set.
+7. The client bounds the complete envelope and encoded fields before Base64 decode,
    rejects redirects, and tries at most a configured number of mirrors
    sequentially.
-7. Client trusted state contains the highest version, issuance time, and exact
-   signed-payload SHA-256. An identical payload from another mirror is valid;
-   different bytes at the same version are equivocation.
+8. Client trusted state contains the highest manifest and policy versions, key epoch,
+   and exact policy/payload SHA-256 digests. An identical payload from another mirror
+   is valid; different bytes at the same version are equivocation.
 
 ## Operational requirements
 
 - `MANIFEST_STATE_PATH` must be durable, writable only by the service user, and
   included in atomic encrypted backups with the signing key.
 - Restoring either file independently or to an older snapshot is prohibited.
-- Loss or suspected corruption requires a documented signing-root rotation, not
-  deletion of the state file.
+- Loss or suspected corruption requires a verified atomic-state restore. Deleting
+  the file or rotating only the online key is prohibited; offline-root recovery is
+  separate, unimplemented work.
+- The root private key remains offline. Online-key rotation follows the dedicated
+  runbook and publishes the higher policy before the cutover version.
 - Do not share the file store over NFS or start multiple replicas. HA requires a
   transactional compare-and-swap allocator with equivalent durability semantics.
 - Client trusted state must eventually use the platform secure store. Deleting it
@@ -51,10 +56,11 @@ This repository is not a TUF implementation and must not claim TUF compatibility
 
 ## Consequences
 
-Availability no longer depends on one discovery hostname, and replay protection
-survives ordinary process restarts. The state file becomes security-critical and
-requires explicit backup/restore procedures. Root key rotation and freeze detection
-when no fresh manifest is reachable remain separate work.
+Availability no longer depends on one discovery hostname, replay protection survives
+ordinary process restarts, and compromise of a retired online key does not authorize
+later ranges. The state file becomes security-critical and requires explicit
+backup/restore procedures. Offline-root rotation and freeze detection when no fresh
+manifest is reachable remain separate work.
 
 ## References
 

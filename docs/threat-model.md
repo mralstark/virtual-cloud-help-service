@@ -84,8 +84,9 @@ time-bounded tester consent.
 
 ## Security invariants
 
-1. A manifest is accepted only when its bounded encoding, signature, full key ID,
-   schema, lifetime, monotonic version, and same-version payload digest are valid.
+1. A manifest is accepted only when its bounded encoding, offline-root key policy,
+   online signature, schema, lifetime, monotonic versions, key epoch, and exact
+   policy/payload digests are valid.
 2. A data-plane compromise does not disclose the manifest signing key or database.
 3. A device private key never leaves that device.
 4. Revoking one device does not rotate unrelated device credentials.
@@ -94,6 +95,8 @@ time-bounded tester consent.
 6. Readiness fails closed when the catalog or signing material is invalid.
 7. A newly issued manifest version is persisted before publish, and catalog content
    cannot change without a higher operator revision.
+8. Online signing-key version ranges never overlap. Retiring a key requires a higher
+   offline-root policy, and an accepted policy cannot be rolled back.
 
 ## Deferred validation
 

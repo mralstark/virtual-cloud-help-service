@@ -18,20 +18,22 @@ import (
 	"github.com/mralstark/virtual-cloud-help-service/internal/manifest"
 )
 
-const defaultMaxAttempts = 3
-
 const defaultAttemptTimeout = 12 * time.Second
+const defaultOverallTimeout = 60 * time.Second
 
 var sourceIDPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,62}$`)
 
 type Client struct {
 	HTTP        *http.Client
-	TrustedKeys map[string]ed25519.PublicKey
+	RootKey     ed25519.PublicKey
 	Now         func() time.Time
 	MaxAttempts int
 	// AttemptTimeout bounds each mirror independently even when a custom HTTP
 	// client has no timeout.
 	AttemptTimeout time.Duration
+	// OverallTimeout is shared fairly across all selected mirrors. A shorter caller
+	// deadline always wins.
+	OverallTimeout time.Duration
 }
 
 type Result struct {
@@ -43,8 +45,12 @@ type Result struct {
 // Fetch tries signed discovery mirrors sequentially. Parallel probing is avoided on
 // purpose: several observed DPI policies penalize bursts of similar TLS connections.
 func (client Client) Fetch(ctx context.Context, sources []manifest.DiscoveryEndpoint, trusted manifest.TrustedState) (Result, error) {
-	if len(client.TrustedKeys) == 0 {
-		return Result{}, errors.New("discovery: at least one pinned manifest key is required")
+	if len(client.RootKey) != ed25519.PublicKeySize {
+		return Result{}, errors.New("discovery: a pinned offline root public key is required")
+	}
+	rootKey := append(ed25519.PublicKey(nil), client.RootKey...)
+	if len(sources) == 0 || len(sources) > 16 {
+		return Result{}, errors.New("discovery: sources must contain between 1 and 16 entries")
 	}
 	httpClient := client.HTTP
 	if httpClient == nil {
@@ -56,13 +62,10 @@ func (client Client) Fetch(ctx context.Context, sources []manifest.DiscoveryEndp
 	}
 	maxAttempts := client.MaxAttempts
 	if maxAttempts == 0 {
-		maxAttempts = defaultMaxAttempts
+		maxAttempts = len(sources)
 	}
 	if maxAttempts < 1 || maxAttempts > 16 {
 		return Result{}, errors.New("discovery: max attempts must be between 1 and 16")
-	}
-	if len(sources) == 0 || len(sources) > 16 {
-		return Result{}, errors.New("discovery: sources must contain between 1 and 16 entries")
 	}
 	attemptTimeout := client.AttemptTimeout
 	if attemptTimeout == 0 {
@@ -70,6 +73,13 @@ func (client Client) Fetch(ctx context.Context, sources []manifest.DiscoveryEndp
 	}
 	if attemptTimeout < time.Second || attemptTimeout > 30*time.Second {
 		return Result{}, errors.New("discovery: attempt timeout must be between 1s and 30s")
+	}
+	overallTimeout := client.OverallTimeout
+	if overallTimeout == 0 {
+		overallTimeout = defaultOverallTimeout
+	}
+	if overallTimeout < 5*time.Second || overallTimeout > 5*time.Minute {
+		return Result{}, errors.New("discovery: overall timeout must be between 5s and 5m")
 	}
 	seenIDs := make(map[string]struct{}, len(sources))
 	for _, source := range sources {
@@ -99,16 +109,29 @@ func (client Client) Fetch(ctx context.Context, sources []manifest.DiscoveryEndp
 		ordered = ordered[:maxAttempts]
 	}
 
+	fetchContext, cancelFetch := context.WithTimeout(ctx, overallTimeout)
+	defer cancelFetch()
 	var failures []error
-	for _, source := range ordered {
-		attemptContext, cancel := context.WithTimeout(ctx, attemptTimeout)
-		document, nextState, err := client.fetchOne(attemptContext, httpClient, source, now(), trusted)
+	for index, source := range ordered {
+		attemptBudget := attemptTimeout
+		if deadline, exists := fetchContext.Deadline(); exists {
+			remainingBudget := time.Until(deadline)
+			fairShare := remainingBudget / time.Duration(len(ordered)-index)
+			if fairShare < attemptBudget {
+				attemptBudget = fairShare
+			}
+		}
+		if attemptBudget <= 0 {
+			break
+		}
+		attemptContext, cancel := context.WithTimeout(fetchContext, attemptBudget)
+		document, nextState, err := client.fetchOne(attemptContext, httpClient, rootKey, source, now(), trusted)
 		cancel()
 		if err == nil {
 			return Result{Document: document, Trusted: nextState, SourceID: source.ID}, nil
 		}
 		failures = append(failures, fmt.Errorf("%s: %w", source.ID, err))
-		if ctx.Err() != nil {
+		if fetchContext.Err() != nil {
 			break
 		}
 	}
@@ -118,7 +141,7 @@ func (client Client) Fetch(ctx context.Context, sources []manifest.DiscoveryEndp
 	return Result{}, fmt.Errorf("discovery: all attempted sources failed: %w", errors.Join(failures...))
 }
 
-func (client Client) fetchOne(ctx context.Context, httpClient *http.Client, source manifest.DiscoveryEndpoint, now time.Time, trusted manifest.TrustedState) (manifest.Document, manifest.TrustedState, error) {
+func (client Client) fetchOne(ctx context.Context, httpClient *http.Client, rootKey ed25519.PublicKey, source manifest.DiscoveryEndpoint, now time.Time, trusted manifest.TrustedState) (manifest.Document, manifest.TrustedState, error) {
 	parsed, err := validateSource(source)
 	if err != nil {
 		return manifest.Document{}, trusted, err
@@ -153,11 +176,7 @@ func (client Client) fetchOne(ctx context.Context, httpClient *http.Client, sour
 	if err != nil {
 		return manifest.Document{}, trusted, err
 	}
-	publicKey, exists := client.TrustedKeys[envelope.KeyID]
-	if !exists {
-		return manifest.Document{}, trusted, fmt.Errorf("untrusted manifest key %q", envelope.KeyID)
-	}
-	document, nextState, err := manifest.Verify(envelope, publicKey, now, trusted)
+	document, nextState, err := manifest.Verify(envelope, rootKey, now, trusted)
 	if err != nil {
 		return manifest.Document{}, trusted, err
 	}

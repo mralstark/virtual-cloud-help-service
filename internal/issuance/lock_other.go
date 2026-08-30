@@ -2,12 +2,14 @@
 
 package issuance
 
+import "errors"
+
 type ProcessLock struct{}
 
-// Signing-key loading fails closed outside Linux, so this exists only to keep
-// platform-independent library tests buildable. It is not a production lock.
+// Fail closed even for direct library callers. Tests that exercise issuer logic on
+// non-Linux platforms inject an in-memory lock instead.
 func AcquireProcessLock(string) (*ProcessLock, error) {
-	return &ProcessLock{}, nil
+	return nil, errors.New("issuer process locking is supported only on Linux")
 }
 
 func (lock *ProcessLock) Close() error {

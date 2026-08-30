@@ -12,6 +12,7 @@ import (
 
 	"github.com/mralstark/virtual-cloud-help-service/internal/api"
 	"github.com/mralstark/virtual-cloud-help-service/internal/config"
+	"github.com/mralstark/virtual-cloud-help-service/internal/manifest"
 	"github.com/mralstark/virtual-cloud-help-service/internal/service"
 	"github.com/mralstark/virtual-cloud-help-service/internal/signingkey"
 )
@@ -32,12 +33,30 @@ func run(logger *log.Logger) error {
 	if err != nil {
 		return err
 	}
+	rootKey, err := signingkey.LoadPublic(cfg.RootKeyPath)
+	if err != nil {
+		return err
+	}
+	policyFile, err := os.Open(cfg.KeyPolicyPath)
+	if err != nil {
+		return err
+	}
+	keyPolicy, policyErr := manifest.DecodeKeyPolicy(policyFile)
+	closeErr := policyFile.Close()
+	if policyErr != nil {
+		return policyErr
+	}
+	if closeErr != nil {
+		return closeErr
+	}
 	issuer, err := service.NewIssuer(service.IssuerOptions{
 		CatalogPath: cfg.CatalogPath,
 		StatePath:   cfg.IssuerStatePath,
 		TTL:         cfg.ManifestTTL,
 		CacheFor:    cfg.ManifestCache,
 		PrivateKey:  privateKey,
+		RootKey:     rootKey,
+		KeyPolicy:   keyPolicy,
 		Now:         time.Now,
 	})
 	if err != nil {

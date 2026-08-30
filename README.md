@@ -9,10 +9,15 @@ endpoint and discovery manifest. It persists a monotonic issuer sequence so a
 restart cannot silently roll clients back. The repository also contains reusable
 client-side verification, bounded mirror discovery, and endpoint planning packages.
 
+An offline Ed25519 root signs a versioned key policy. The policy assigns contiguous,
+non-overlapping manifest-version ranges to online signing keys, so a retired online
+key cannot sign a later version and a policy rollback is rejected.
+
 ## Current scope
 
 - signed endpoint and discovery manifests with durable issuer versions;
-- strict size, schema, signature, expiry, rollback, and equivocation checks;
+- strict size, schema, offline-root policy, signature, expiry, rollback, and
+  equivocation checks;
 - sequential discovery fallback with pinned signing keys and bounded downloads;
 - a transport-aware endpoint planner with cooldown and provider/ASN diversity;
 - liveness, readiness, and manifest HTTP endpoints;
@@ -35,10 +40,22 @@ only been implemented and reviewed for Linux.
 
 ```bash
 go run ./cmd/manifest-keygen \
+  -private-out .local/manifest-root.key \
+  -public-out .local/manifest-root.pub
+
+go run ./cmd/manifest-keygen \
   -private-out .local/manifest-signing.key \
   -public-out .local/manifest-signing.pub
 
+go run ./cmd/manifest-key-policy \
+  -root-private .local/manifest-root.key \
+  -grants config/key-grants.example.json \
+  -policy-version 1 \
+  -out .local/manifest-key-policy.json
+
 MANIFEST_SIGNING_KEY_PATH=.local/manifest-signing.key \
+MANIFEST_ROOT_PUBLIC_KEY_PATH=.local/manifest-root.pub \
+MANIFEST_KEY_POLICY_PATH=.local/manifest-key-policy.json \
 MANIFEST_STATE_PATH=.local/issuer-state.json \
 MANIFEST_CATALOG_PATH=config/nodes.example.json \
 go run ./cmd/control-plane
@@ -61,7 +78,7 @@ go test ./...
 go test -race ./...
 go vet ./...
 go run golang.org/x/vuln/cmd/govulncheck@v1.1.4 ./...
-go build -trimpath ./cmd/control-plane ./cmd/manifest-keygen
+go build -trimpath ./cmd/control-plane ./cmd/manifest-keygen ./cmd/manifest-key-policy
 ```
 
 ## Configuration
@@ -71,6 +88,8 @@ go build -trimpath ./cmd/control-plane ./cmd/manifest-keygen
 | `LISTEN_ADDRESS` | `127.0.0.1:8080` | HTTP listen address |
 | `MANIFEST_CATALOG_PATH` | `config/nodes.json` | Unsigned public node catalog |
 | `MANIFEST_SIGNING_KEY_PATH` | required | Mounted Ed25519 private key file |
+| `MANIFEST_ROOT_PUBLIC_KEY_PATH` | required | Pinned offline-root public key |
+| `MANIFEST_KEY_POLICY_PATH` | required | Offline-root-signed online key policy |
 | `MANIFEST_STATE_PATH` | required | Durable monotonic issuer state file |
 | `MANIFEST_TTL` | `15m` | Signed manifest lifetime, 1–60 minutes |
 | `MANIFEST_CACHE_TTL` | `30s` | Cached envelope and catalog reload interval |
@@ -82,15 +101,20 @@ reverse proxy. The private signing key must be mounted read-only as a secret and
 must never be committed, copied into an image, or passed in a URL. The issuer state
 must be on persistent storage owned by the service user (`0600` file in a `0700`
 directory), backed up atomically with the signing key, and never restored to an
-older snapshot. Losing it requires a controlled signing-key rotation; starting from
-version one with the same key is unsafe. The file-backed issuer is deliberately
+older snapshot. Losing it is not recoverable by deleting the file or rotating only
+the online key; restore a verified atomic backup. The file-backed issuer is deliberately
 single-active on Linux. Do not place its lock/state files on NFS or run multiple
 replicas; HA requires a transactional compare-and-swap state-store implementation.
+
+The root private key must never be mounted on the control plane. Keep it offline and
+use it only to create a new policy file during a reviewed signing-key rotation. See
+the [signing-key rotation runbook](docs/runbooks/signing-key-rotation.md).
 
 ## Project status
 
 Read [the roadmap](docs/roadmap.md), [threat model](docs/threat-model.md), and
-[architecture overview](docs/architecture.md) before deploying anything. A true
+[production-readiness gate](docs/production-readiness.md) before deploying anything.
+The [architecture overview](docs/architecture.md) describes current boundaries. A true
 network allowlist can make an ordinary foreign VPS unreachable; this project does
 not claim to be unblockable or production-ready. Current research is recorded with
 an explicit evidence cutoff of 2026-08-30 rather than claiming knowledge from the

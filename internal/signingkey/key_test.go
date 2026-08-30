@@ -3,6 +3,7 @@ package signingkey
 import (
 	"bytes"
 	"crypto/ed25519"
+	"encoding/base64"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -33,8 +34,24 @@ func TestGenerateAndLoadPrivateKey(t *testing.T) {
 	if !bytes.Equal(privateKey.Public().(ed25519.PublicKey), publicKey) {
 		t.Fatal("loaded private key does not match generated public key")
 	}
+	loadedPublicKey, err := LoadPublic(publicPath)
+	if err != nil {
+		t.Fatalf("LoadPublic() error = %v", err)
+	}
+	if !bytes.Equal(loadedPublicKey, publicKey) {
+		t.Fatal("loaded public key does not match generated public key")
+	}
 	if _, err := GenerateFiles(privatePath, publicPath); err == nil {
 		t.Fatal("GenerateFiles() overwrote existing key files")
+	}
+	corrupted := append(ed25519.PrivateKey(nil), privateKey...)
+	corrupted[len(corrupted)-1] ^= 1
+	corruptedPath := filepath.Join(directory, "corrupted.key")
+	if err := os.WriteFile(corruptedPath, []byte(base64.RawURLEncoding.EncodeToString(corrupted)), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := LoadPrivate(corruptedPath); err == nil {
+		t.Fatal("LoadPrivate() accepted an inconsistent private key")
 	}
 }
 
