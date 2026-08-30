@@ -21,7 +21,19 @@ func TestFetchUsesSequentialPriorityFallbackAndVerifies(t *testing.T) {
 	}
 	now := time.Date(2026, 8, 30, 12, 0, 0, 0, time.UTC)
 	catalog := discoveryCatalog()
-	envelope, err := manifest.Issue(catalog, 9, now, 15*time.Minute, privateKey)
+	rootPublicKey, rootPrivateKey, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	grant, err := manifest.NewKeyGrant(publicKey, 1, 1, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	keyPolicy, err := manifest.SignKeyPolicy(rootPrivateKey, 1, []manifest.KeyGrant{grant})
+	if err != nil {
+		t.Fatal(err)
+	}
+	envelope, err := manifest.Issue(catalog, 9, keyPolicy, rootPublicKey, now, 15*time.Minute, privateKey)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -43,15 +55,15 @@ func TestFetchUsesSequentialPriorityFallbackAndVerifies(t *testing.T) {
 	defer server.Close()
 
 	sources := []manifest.DiscoveryEndpoint{
-		{ID: "backup", URL: server.URL + "/manifest", Priority: 20},
 		{ID: "primary", URL: server.URL + "/unavailable", Priority: 10},
+		{ID: "secondary", URL: server.URL + "/unavailable", Priority: 20},
+		{ID: "tertiary", URL: server.URL + "/unavailable", Priority: 30},
+		{ID: "backup", URL: server.URL + "/manifest", Priority: 40},
 	}
 	client := Client{
-		HTTP: server.Client(),
-		TrustedKeys: map[string]ed25519.PublicKey{
-			manifest.KeyID(publicKey): publicKey,
-		},
-		Now: func() time.Time { return now.Add(time.Minute) },
+		HTTP:    server.Client(),
+		RootKey: rootPublicKey,
+		Now:     func() time.Time { return now.Add(time.Minute) },
 	}
 	result, err := client.Fetch(context.Background(), sources, manifest.TrustedState{})
 	if err != nil {
@@ -60,8 +72,8 @@ func TestFetchUsesSequentialPriorityFallbackAndVerifies(t *testing.T) {
 	if result.SourceID != "backup" || result.Document.Version != 9 || result.Trusted.Version != 9 {
 		t.Fatalf("Fetch() result = %+v", result)
 	}
-	if failedCalls.Load() != 1 || successfulCalls.Load() != 1 {
-		t.Fatalf("calls = failed %d successful %d, want 1 each", failedCalls.Load(), successfulCalls.Load())
+	if failedCalls.Load() != 3 || successfulCalls.Load() != 1 {
+		t.Fatalf("calls = failed %d successful %d, want 3 and 1", failedCalls.Load(), successfulCalls.Load())
 	}
 }
 
@@ -78,7 +90,7 @@ func TestFetchRejectsRedirectToAnotherOrigin(t *testing.T) {
 
 	client := Client{
 		HTTP:        redirector.Client(),
-		TrustedKeys: map[string]ed25519.PublicKey{"unused": make(ed25519.PublicKey, ed25519.PublicKeySize)},
+		RootKey:     make(ed25519.PublicKey, ed25519.PublicKeySize),
 		MaxAttempts: 1,
 	}
 	_, err := client.Fetch(context.Background(), []manifest.DiscoveryEndpoint{{ID: "source", URL: redirector.URL, Priority: 1}}, manifest.TrustedState{})

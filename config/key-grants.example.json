@@ -1,0 +1,8 @@
+[
+  {
+    "public_key_path": ".local/manifest-signing.pub",
+    "epoch": 1,
+    "not_before_version": 1,
+    "not_after_version": 0
+  }
+]

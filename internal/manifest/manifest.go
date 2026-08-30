@@ -18,7 +18,7 @@ import (
 )
 
 const (
-	SchemaVersion      = 2
+	SchemaVersion      = 3
 	Algorithm          = "Ed25519"
 	maxManifestBytes   = 1 << 20
 	maxManifestLife    = time.Hour
@@ -51,6 +51,7 @@ type Document struct {
 	CatalogRevision uint64              `json:"catalog_revision"`
 	IssuedAt        time.Time           `json:"issued_at"`
 	ExpiresAt       time.Time           `json:"expires_at"`
+	KeyPolicy       KeyPolicy           `json:"key_policy"`
 	Discovery       []DiscoveryEndpoint `json:"discovery"`
 	Nodes           []Node              `json:"nodes"`
 }
@@ -96,15 +97,19 @@ type Envelope struct {
 // digest rejects equivocation at the same version; Version and IssuedAt reject
 // rollback. It contains no user or network identifiers.
 type TrustedState struct {
-	Version       uint64    `json:"version"`
-	IssuedAt      time.Time `json:"issued_at"`
-	PayloadSHA256 string    `json:"payload_sha256"`
+	Version         uint64    `json:"version"`
+	IssuedAt        time.Time `json:"issued_at"`
+	PayloadSHA256   string    `json:"payload_sha256"`
+	PolicyVersion   uint64    `json:"policy_version"`
+	PolicySHA256    string    `json:"policy_sha256"`
+	SigningKeyID    string    `json:"signing_key_id"`
+	SigningKeyEpoch uint64    `json:"signing_key_epoch"`
 }
 
 // Issue validates and canonicalizes a catalog, applies a bounded lifetime, and
 // signs the exact serialized payload using an issuer-allocated monotonic version.
-func Issue(catalog Catalog, version uint64, now time.Time, ttl time.Duration, privateKey ed25519.PrivateKey) (Envelope, error) {
-	if len(privateKey) != ed25519.PrivateKeySize {
+func Issue(catalog Catalog, version uint64, keyPolicy KeyPolicy, rootPublicKey ed25519.PublicKey, now time.Time, ttl time.Duration, privateKey ed25519.PrivateKey) (Envelope, error) {
+	if !validEd25519PrivateKey(privateKey) {
 		return Envelope{}, errors.New("manifest: invalid Ed25519 private key")
 	}
 	if version == 0 {
@@ -112,6 +117,13 @@ func Issue(catalog Catalog, version uint64, now time.Time, ttl time.Duration, pr
 	}
 	if ttl < time.Minute || ttl > maxManifestLife {
 		return Envelope{}, fmt.Errorf("manifest: ttl must be between 1m and %s", maxManifestLife)
+	}
+	if _, err := ValidateKeyPolicy(keyPolicy, rootPublicKey); err != nil {
+		return Envelope{}, err
+	}
+	publicKey := privateKey.Public().(ed25519.PublicKey)
+	if _, _, err := KeyPolicyGrant(keyPolicy, KeyID(publicKey), version); err != nil {
+		return Envelope{}, err
 	}
 
 	now = now.UTC().Truncate(time.Second)
@@ -121,6 +133,7 @@ func Issue(catalog Catalog, version uint64, now time.Time, ttl time.Duration, pr
 		CatalogRevision: catalog.Revision,
 		IssuedAt:        now,
 		ExpiresAt:       now.Add(ttl),
+		KeyPolicy:       canonicalKeyPolicy(keyPolicy),
 		Discovery:       canonicalDiscovery(catalog.Discovery),
 		Nodes:           canonicalNodes(catalog.Nodes),
 	}
@@ -136,7 +149,6 @@ func Issue(catalog Catalog, version uint64, now time.Time, ttl time.Duration, pr
 		return Envelope{}, errors.New("manifest: encoded payload exceeds 1 MiB")
 	}
 
-	publicKey := privateKey.Public().(ed25519.PublicKey)
 	signature := ed25519.Sign(privateKey, payload)
 	return Envelope{
 		Algorithm: Algorithm,
@@ -167,15 +179,15 @@ func DecodeEnvelope(reader io.Reader) (Envelope, error) {
 // Verify authenticates an envelope, validates its lifetime, and advances a caller's
 // durable anti-replay state. An exact same-version payload from another mirror is
 // accepted; different bytes at that version are rejected as equivocation.
-func Verify(envelope Envelope, publicKey ed25519.PublicKey, now time.Time, trusted TrustedState) (Document, TrustedState, error) {
-	if len(publicKey) != ed25519.PublicKeySize {
-		return Document{}, trusted, errors.New("manifest: invalid Ed25519 public key")
+func Verify(envelope Envelope, rootPublicKey ed25519.PublicKey, now time.Time, trusted TrustedState) (Document, TrustedState, error) {
+	if len(rootPublicKey) != ed25519.PublicKeySize {
+		return Document{}, trusted, errors.New("manifest: invalid offline root public key")
 	}
 	if envelope.Algorithm != Algorithm {
 		return Document{}, trusted, fmt.Errorf("manifest: unsupported algorithm %q", envelope.Algorithm)
 	}
-	if envelope.KeyID != KeyID(publicKey) {
-		return Document{}, trusted, errors.New("manifest: signing key ID does not match pinned key")
+	if envelope.KeyID == "" {
+		return Document{}, trusted, errors.New("manifest: signing key ID is required")
 	}
 
 	maxEncodedPayload := base64.RawURLEncoding.EncodedLen(maxManifestBytes)
@@ -198,16 +210,23 @@ func Verify(envelope Envelope, publicKey ed25519.PublicKey, now time.Time, trust
 	if err != nil {
 		return Document{}, trusted, fmt.Errorf("manifest: decode signature: %w", err)
 	}
-	if len(signature) != ed25519.SignatureSize || !ed25519.Verify(publicKey, payload, signature) {
-		return Document{}, trusted, errors.New("manifest: signature verification failed")
-	}
-
 	var document Document
 	if err := decodeStrict(payload, &document); err != nil {
 		return Document{}, trusted, fmt.Errorf("manifest: decode signed document: %w", err)
 	}
 	if err := Validate(document); err != nil {
 		return Document{}, trusted, err
+	}
+	policyDigest, err := ValidateKeyPolicy(document.KeyPolicy, rootPublicKey)
+	if err != nil {
+		return Document{}, trusted, err
+	}
+	grant, signingPublicKey, err := KeyPolicyGrant(document.KeyPolicy, envelope.KeyID, document.Version)
+	if err != nil {
+		return Document{}, trusted, err
+	}
+	if len(signature) != ed25519.SignatureSize || !ed25519.Verify(signingPublicKey, payload, signature) {
+		return Document{}, trusted, errors.New("manifest: signature verification failed")
 	}
 
 	now = now.UTC()
@@ -220,11 +239,15 @@ func Verify(envelope Envelope, publicKey ed25519.PublicKey, now time.Time, trust
 
 	payloadDigest := sha256.Sum256(payload)
 	candidate := TrustedState{
-		Version:       document.Version,
-		IssuedAt:      document.IssuedAt,
-		PayloadSHA256: base64.RawURLEncoding.EncodeToString(payloadDigest[:]),
+		Version:         document.Version,
+		IssuedAt:        document.IssuedAt,
+		PayloadSHA256:   base64.RawURLEncoding.EncodeToString(payloadDigest[:]),
+		PolicyVersion:   document.KeyPolicy.Version,
+		PolicySHA256:    policyDigest,
+		SigningKeyID:    grant.KeyID,
+		SigningKeyEpoch: grant.Epoch,
 	}
-	if err := validateTransition(trusted, candidate); err != nil {
+	if err := validateStateTransition(trusted, candidate); err != nil {
 		return Document{}, trusted, err
 	}
 	if trusted.Version == candidate.Version {
@@ -245,7 +268,7 @@ func CatalogDigest(catalog Catalog) (string, error) {
 		Discovery:       canonicalDiscovery(catalog.Discovery),
 		Nodes:           canonicalNodes(catalog.Nodes),
 	}
-	if err := Validate(document); err != nil {
+	if err := validateCatalogContents(document.Discovery, document.Nodes); err != nil {
 		return "", err
 	}
 	canonical, err := json.Marshal(Catalog{
@@ -279,16 +302,26 @@ func Validate(document Document) error {
 	if document.ExpiresAt.Sub(document.IssuedAt) > maxManifestLife {
 		return fmt.Errorf("manifest: lifetime exceeds %s", maxManifestLife)
 	}
-	if err := validateDiscovery(document.Discovery); err != nil {
+	if document.KeyPolicy.Signature == "" {
+		return errors.New("manifest: signed key policy is required")
+	}
+	if err := validateKeyPolicyShape(document.KeyPolicy); err != nil {
 		return err
 	}
-	if len(document.Nodes) == 0 || len(document.Nodes) > 1000 {
+	return validateCatalogContents(document.Discovery, document.Nodes)
+}
+
+func validateCatalogContents(discovery []DiscoveryEndpoint, nodes []Node) error {
+	if err := validateDiscovery(discovery); err != nil {
+		return err
+	}
+	if len(nodes) == 0 || len(nodes) > 1000 {
 		return errors.New("manifest: nodes must contain between 1 and 1000 entries")
 	}
 
-	nodeIDs := make(map[string]struct{}, len(document.Nodes))
+	nodeIDs := make(map[string]struct{}, len(nodes))
 	endpointIDs := make(map[string]struct{})
-	for nodeIndex, node := range document.Nodes {
+	for nodeIndex, node := range nodes {
 		if !idPattern.MatchString(node.ID) {
 			return fmt.Errorf("manifest: node %d has invalid id %q", nodeIndex, node.ID)
 		}
@@ -391,15 +424,27 @@ func validateEndpoint(endpoint Endpoint) error {
 	return nil
 }
 
-func validateTransition(trusted, candidate TrustedState) error {
+func validateStateTransition(trusted, candidate TrustedState) error {
 	if trusted.Version == 0 {
-		if trusted.PayloadSHA256 != "" || !trusted.IssuedAt.IsZero() {
+		if trusted.PayloadSHA256 != "" || !trusted.IssuedAt.IsZero() || trusted.PolicyVersion != 0 ||
+			trusted.PolicySHA256 != "" || trusted.SigningKeyID != "" || trusted.SigningKeyEpoch != 0 {
 			return errors.New("manifest: trusted state is internally inconsistent")
 		}
 		return nil
 	}
-	if trusted.PayloadSHA256 == "" || trusted.IssuedAt.IsZero() {
+	if trusted.PayloadSHA256 == "" || trusted.IssuedAt.IsZero() || trusted.PolicyVersion == 0 ||
+		trusted.PolicySHA256 == "" || trusted.SigningKeyID == "" || trusted.SigningKeyEpoch == 0 {
 		return errors.New("manifest: trusted state is incomplete")
+	}
+	if !validSHA256Digest(trusted.PayloadSHA256) || !validSHA256Digest(trusted.PolicySHA256) ||
+		len(trusted.SigningKeyID) != base64.RawURLEncoding.EncodedLen(sha256.Size) {
+		return errors.New("manifest: trusted state contains invalid digests or key ID")
+	}
+	if candidate.PolicyVersion < trusted.PolicyVersion {
+		return fmt.Errorf("manifest: key policy version %d is older than trusted policy %d", candidate.PolicyVersion, trusted.PolicyVersion)
+	}
+	if candidate.PolicyVersion == trusted.PolicyVersion && candidate.PolicySHA256 != trusted.PolicySHA256 {
+		return errors.New("manifest: same-version key policy equivocation detected")
 	}
 	if candidate.Version < trusted.Version {
 		return fmt.Errorf("manifest: version %d is older than trusted version %d", candidate.Version, trusted.Version)
@@ -413,7 +458,21 @@ func validateTransition(trusted, candidate TrustedState) error {
 	if candidate.IssuedAt.Before(trusted.IssuedAt) {
 		return errors.New("manifest: issuance time moved backwards")
 	}
+	if candidate.SigningKeyEpoch < trusted.SigningKeyEpoch {
+		return errors.New("manifest: signing key epoch moved backwards")
+	}
+	if candidate.SigningKeyID == trusted.SigningKeyID && candidate.SigningKeyEpoch != trusted.SigningKeyEpoch {
+		return errors.New("manifest: signing key epoch changed without changing the key")
+	}
+	if candidate.SigningKeyID != trusted.SigningKeyID && candidate.SigningKeyEpoch <= trusted.SigningKeyEpoch {
+		return errors.New("manifest: signing key changed without advancing its epoch")
+	}
 	return nil
+}
+
+func validSHA256Digest(encoded string) bool {
+	raw, err := base64.RawURLEncoding.DecodeString(encoded)
+	return err == nil && len(raw) == sha256.Size
 }
 
 func validHost(host string) bool {

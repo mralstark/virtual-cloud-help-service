@@ -17,6 +17,9 @@ const maxStateBytes = 16 << 10
 
 type State struct {
 	KeyID           string    `json:"key_id"`
+	KeyEpoch        uint64    `json:"key_epoch"`
+	PolicyVersion   uint64    `json:"policy_version"`
+	PolicySHA256    string    `json:"policy_sha256"`
 	LastVersion     uint64    `json:"last_version"`
 	CatalogRevision uint64    `json:"catalog_revision"`
 	CatalogSHA256   string    `json:"catalog_sha256"`
@@ -65,7 +68,7 @@ func (store FileStore) Load() (State, bool, error) {
 	if err := decodeStrict(data, &state); err != nil {
 		return State{}, false, fmt.Errorf("decode issuer state: %w", err)
 	}
-	if err := validate(state); err != nil {
+	if err := validate(state, true); err != nil {
 		return State{}, false, err
 	}
 	return state, true, nil
@@ -75,7 +78,7 @@ func (store FileStore) Save(state State) error {
 	if store.Path == "" {
 		return errors.New("issuer state path is required")
 	}
-	if err := validate(state); err != nil {
+	if err := validate(state, false); err != nil {
 		return err
 	}
 	directory := filepath.Dir(store.Path)
@@ -143,13 +146,24 @@ func checkDirectory(path string) error {
 	return nil
 }
 
-func validate(state State) error {
+func validate(state State, allowLegacy bool) error {
 	if state.KeyID == "" || state.LastVersion == 0 || state.CatalogRevision == 0 || state.LastIssuedAt.IsZero() {
 		return errors.New("issuer state is incomplete")
 	}
 	digest, err := base64.RawURLEncoding.DecodeString(state.CatalogSHA256)
 	if err != nil || len(digest) != 32 {
 		return errors.New("issuer state catalog digest is invalid")
+	}
+	legacyPolicyState := state.KeyEpoch == 0 && state.PolicyVersion == 0 && state.PolicySHA256 == ""
+	if legacyPolicyState && allowLegacy {
+		return nil
+	}
+	if state.KeyEpoch == 0 || state.PolicyVersion == 0 || state.PolicySHA256 == "" {
+		return errors.New("issuer state key policy fields are incomplete")
+	}
+	policyDigest, err := base64.RawURLEncoding.DecodeString(state.PolicySHA256)
+	if err != nil || len(policyDigest) != 32 {
+		return errors.New("issuer state key policy digest is invalid")
 	}
 	return nil
 }

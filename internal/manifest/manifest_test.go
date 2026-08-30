@@ -11,17 +11,21 @@ import (
 
 func TestIssueAndVerifyRoundTrip(t *testing.T) {
 	publicKey, privateKey := testKey(t)
+	rootPublicKey, keyPolicy := testKeyPolicy(t, publicKey)
 	now := time.Date(2026, 8, 30, 12, 0, 0, 0, time.UTC)
-	envelope, err := Issue(testCatalog(), 42, now, 15*time.Minute, privateKey)
+	envelope, err := Issue(testCatalog(), 42, keyPolicy, rootPublicKey, now, 15*time.Minute, privateKey)
 	if err != nil {
 		t.Fatalf("Issue() error = %v", err)
 	}
-	document, state, err := Verify(envelope, publicKey, now.Add(time.Minute), TrustedState{})
+	document, state, err := Verify(envelope, rootPublicKey, now.Add(time.Minute), TrustedState{})
 	if err != nil {
 		t.Fatalf("Verify() error = %v", err)
 	}
 	if document.Version != 42 || state.Version != 42 {
 		t.Fatalf("versions = document %d state %d, want 42", document.Version, state.Version)
+	}
+	if state.PolicyVersion != 1 || state.SigningKeyID != KeyID(publicKey) || state.SigningKeyEpoch != 1 {
+		t.Fatalf("trusted signing state = %+v", state)
 	}
 	if document.CatalogRevision != 7 {
 		t.Fatalf("CatalogRevision = %d, want 7", document.CatalogRevision)
@@ -39,7 +43,7 @@ func TestIssueAndVerifyRoundTrip(t *testing.T) {
 		t.Fatalf("KeyID = %q, want %q", envelope.KeyID, KeyID(publicKey))
 	}
 
-	_, sameState, err := Verify(envelope, publicKey, now.Add(2*time.Minute), state)
+	_, sameState, err := Verify(envelope, rootPublicKey, now.Add(2*time.Minute), state)
 	if err != nil {
 		t.Fatalf("Verify() exact mirrored payload error = %v", err)
 	}
@@ -50,8 +54,9 @@ func TestIssueAndVerifyRoundTrip(t *testing.T) {
 
 func TestVerifyRejectsTamperedPayload(t *testing.T) {
 	publicKey, privateKey := testKey(t)
+	rootPublicKey, keyPolicy := testKeyPolicy(t, publicKey)
 	now := time.Date(2026, 8, 30, 12, 0, 0, 0, time.UTC)
-	envelope, err := Issue(testCatalog(), 1, now, 15*time.Minute, privateKey)
+	envelope, err := Issue(testCatalog(), 1, keyPolicy, rootPublicKey, now, 15*time.Minute, privateKey)
 	if err != nil {
 		t.Fatalf("Issue() error = %v", err)
 	}
@@ -61,39 +66,40 @@ func TestVerifyRejectsTamperedPayload(t *testing.T) {
 	}
 	payload[len(payload)/2] ^= 1
 	envelope.Payload = base64.RawURLEncoding.EncodeToString(payload)
-	if _, _, err := Verify(envelope, publicKey, now, TrustedState{}); err == nil {
+	if _, _, err := Verify(envelope, rootPublicKey, now, TrustedState{}); err == nil {
 		t.Fatal("Verify() accepted a tampered payload")
 	}
 }
 
 func TestVerifyRejectsExpiredRollbackAndEquivocation(t *testing.T) {
 	publicKey, privateKey := testKey(t)
+	rootPublicKey, keyPolicy := testKeyPolicy(t, publicKey)
 	now := time.Date(2026, 8, 30, 12, 0, 0, 0, time.UTC)
-	current, err := Issue(testCatalog(), 7, now, 5*time.Minute, privateKey)
+	current, err := Issue(testCatalog(), 7, keyPolicy, rootPublicKey, now, 5*time.Minute, privateKey)
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, trusted, err := Verify(current, publicKey, now.Add(time.Minute), TrustedState{})
+	_, trusted, err := Verify(current, rootPublicKey, now.Add(time.Minute), TrustedState{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := Verify(current, publicKey, now.Add(5*time.Minute), TrustedState{}); err == nil {
+	if _, _, err := Verify(current, rootPublicKey, now.Add(5*time.Minute), TrustedState{}); err == nil {
 		t.Fatal("Verify() accepted an expired manifest")
 	}
 
-	older, err := Issue(testCatalog(), 6, now.Add(time.Minute), 5*time.Minute, privateKey)
+	older, err := Issue(testCatalog(), 6, keyPolicy, rootPublicKey, now.Add(time.Minute), 5*time.Minute, privateKey)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := Verify(older, publicKey, now.Add(2*time.Minute), trusted); err == nil {
+	if _, _, err := Verify(older, rootPublicKey, now.Add(2*time.Minute), trusted); err == nil {
 		t.Fatal("Verify() accepted a version rollback")
 	}
 
-	equivocation, err := Issue(testCatalog(), 7, now.Add(time.Minute), 5*time.Minute, privateKey)
+	equivocation, err := Issue(testCatalog(), 7, keyPolicy, rootPublicKey, now.Add(time.Minute), 5*time.Minute, privateKey)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := Verify(equivocation, publicKey, now.Add(2*time.Minute), trusted); err == nil {
+	if _, _, err := Verify(equivocation, rootPublicKey, now.Add(2*time.Minute), trusted); err == nil {
 		t.Fatal("Verify() accepted different payload bytes at the same version")
 	}
 }
@@ -148,10 +154,21 @@ func TestCatalogDigestIsCanonicalAndDetectsChange(t *testing.T) {
 
 func TestIssueRejectsInvalidEndpoint(t *testing.T) {
 	_, privateKey := testKey(t)
+	rootPublicKey, keyPolicy := testKeyPolicy(t, privateKey.Public().(ed25519.PublicKey))
 	catalog := testCatalog()
 	catalog.Nodes[0].Endpoints[0].Address = "missing-port"
-	if _, err := Issue(catalog, 1, time.Now(), 15*time.Minute, privateKey); err == nil {
+	if _, err := Issue(catalog, 1, keyPolicy, rootPublicKey, time.Now(), 15*time.Minute, privateKey); err == nil {
 		t.Fatal("Issue() accepted an endpoint without a port")
+	}
+}
+
+func TestIssueRejectsInconsistentPrivateKey(t *testing.T) {
+	publicKey, privateKey := testKey(t)
+	rootPublicKey, keyPolicy := testKeyPolicy(t, publicKey)
+	corrupted := append(ed25519.PrivateKey(nil), privateKey...)
+	corrupted[len(corrupted)-1] ^= 1
+	if _, err := Issue(testCatalog(), 1, keyPolicy, rootPublicKey, time.Now(), 15*time.Minute, corrupted); err == nil {
+		t.Fatal("Issue() accepted a private key whose public half did not match its seed")
 	}
 }
 
@@ -162,6 +179,20 @@ func testKey(t *testing.T) (ed25519.PublicKey, ed25519.PrivateKey) {
 		t.Fatal(err)
 	}
 	return publicKey, privateKey
+}
+
+func testKeyPolicy(t *testing.T, signingPublicKey ed25519.PublicKey) (ed25519.PublicKey, KeyPolicy) {
+	t.Helper()
+	rootPublicKey, rootPrivateKey := testKey(t)
+	grant, err := NewKeyGrant(signingPublicKey, 1, 1, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	policy, err := SignKeyPolicy(rootPrivateKey, 1, []KeyGrant{grant})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return rootPublicKey, policy
 }
 
 func testCatalog() Catalog {

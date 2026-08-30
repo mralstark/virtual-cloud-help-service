@@ -7,6 +7,8 @@ import (
 
 func TestLoadDefaults(t *testing.T) {
 	t.Setenv("MANIFEST_SIGNING_KEY_PATH", "/run/secrets/manifest-key")
+	t.Setenv("MANIFEST_ROOT_PUBLIC_KEY_PATH", "/run/config/manifest-root.pub")
+	t.Setenv("MANIFEST_KEY_POLICY_PATH", "/run/config/manifest-key-policy.json")
 	t.Setenv("MANIFEST_STATE_PATH", "/var/lib/vchs/issuer-state.json")
 	t.Setenv("LISTEN_ADDRESS", "")
 	t.Setenv("MANIFEST_CATALOG_PATH", "")
@@ -34,6 +36,17 @@ func TestLoadRequiresKeyAndBoundsDurations(t *testing.T) {
 	}
 
 	t.Setenv("MANIFEST_SIGNING_KEY_PATH", "key")
+	t.Setenv("MANIFEST_STATE_PATH", "state.json")
+	t.Setenv("MANIFEST_ROOT_PUBLIC_KEY_PATH", "")
+	if _, err := Load(); err == nil {
+		t.Fatal("Load() accepted a missing offline root public key")
+	}
+	t.Setenv("MANIFEST_ROOT_PUBLIC_KEY_PATH", "root.pub")
+	t.Setenv("MANIFEST_KEY_POLICY_PATH", "")
+	if _, err := Load(); err == nil {
+		t.Fatal("Load() accepted a missing signing key policy")
+	}
+	t.Setenv("MANIFEST_KEY_POLICY_PATH", "policy.json")
 	t.Setenv("MANIFEST_STATE_PATH", "")
 	if _, err := Load(); err == nil {
 		t.Fatal("Load() accepted a missing durable issuer state path")

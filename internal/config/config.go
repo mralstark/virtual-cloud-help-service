@@ -22,6 +22,8 @@ type Config struct {
 	ListenAddress   string
 	CatalogPath     string
 	SigningKeyPath  string
+	RootKeyPath     string
+	KeyPolicyPath   string
 	IssuerStatePath string
 	ManifestTTL     time.Duration
 	ManifestCache   time.Duration
@@ -64,6 +66,8 @@ func Load() (Config, error) {
 		ListenAddress:   stringFromEnvironment("LISTEN_ADDRESS", defaultListenAddress),
 		CatalogPath:     stringFromEnvironment("MANIFEST_CATALOG_PATH", defaultCatalogPath),
 		SigningKeyPath:  strings.TrimSpace(os.Getenv("MANIFEST_SIGNING_KEY_PATH")),
+		RootKeyPath:     strings.TrimSpace(os.Getenv("MANIFEST_ROOT_PUBLIC_KEY_PATH")),
+		KeyPolicyPath:   strings.TrimSpace(os.Getenv("MANIFEST_KEY_POLICY_PATH")),
 		IssuerStatePath: strings.TrimSpace(os.Getenv("MANIFEST_STATE_PATH")),
 		ManifestTTL:     manifestTTL,
 		ManifestCache:   manifestCache,
@@ -72,6 +76,12 @@ func Load() (Config, error) {
 	}
 	if result.SigningKeyPath == "" {
 		return Config{}, errors.New("MANIFEST_SIGNING_KEY_PATH is required")
+	}
+	if result.RootKeyPath == "" {
+		return Config{}, errors.New("MANIFEST_ROOT_PUBLIC_KEY_PATH is required")
+	}
+	if result.KeyPolicyPath == "" {
+		return Config{}, errors.New("MANIFEST_KEY_POLICY_PATH is required")
 	}
 	if result.IssuerStatePath == "" {
 		return Config{}, errors.New("MANIFEST_STATE_PATH is required and must be on durable storage")

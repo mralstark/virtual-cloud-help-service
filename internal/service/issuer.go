@@ -15,14 +15,23 @@ import (
 
 type CatalogLoader func(path string) (manifest.Catalog, error)
 
+type processLocker interface {
+	Close() error
+}
+
+type lockAcquirer func(path string) (processLocker, error)
+
 type IssuerOptions struct {
 	CatalogPath string
 	StatePath   string
 	TTL         time.Duration
 	CacheFor    time.Duration
 	PrivateKey  ed25519.PrivateKey
+	RootKey     ed25519.PublicKey
+	KeyPolicy   manifest.KeyPolicy
 	Now         func() time.Time
 	LoadCatalog CatalogLoader
+	acquireLock lockAcquirer
 }
 
 type Issuer struct {
@@ -32,10 +41,14 @@ type Issuer struct {
 	cacheFor    time.Duration
 	privateKey  ed25519.PrivateKey
 	keyID       string
+	keyEpoch    uint64
+	rootKey     ed25519.PublicKey
+	keyPolicy   manifest.KeyPolicy
+	policySHA   string
 	now         func() time.Time
 	loadCatalog CatalogLoader
 	stateStore  issuance.FileStore
-	processLock *issuance.ProcessLock
+	processLock processLocker
 	state       issuance.State
 	cached      manifest.Envelope
 	cacheUntil  time.Time
@@ -49,6 +62,10 @@ func NewIssuer(options IssuerOptions) (*Issuer, error) {
 	if len(options.PrivateKey) != ed25519.PrivateKeySize {
 		return nil, errors.New("issuer: invalid Ed25519 private key")
 	}
+	policyDigest, err := manifest.ValidateKeyPolicy(options.KeyPolicy, options.RootKey)
+	if err != nil {
+		return nil, fmt.Errorf("issuer: validate key policy: %w", err)
+	}
 	if options.TTL < time.Minute || options.TTL > time.Hour {
 		return nil, errors.New("issuer: TTL must be between 1m and 1h")
 	}
@@ -61,8 +78,13 @@ func NewIssuer(options IssuerOptions) (*Issuer, error) {
 	if options.LoadCatalog == nil {
 		options.LoadCatalog = catalog.LoadFile
 	}
+	if options.acquireLock == nil {
+		options.acquireLock = func(path string) (processLocker, error) {
+			return issuance.AcquireProcessLock(path)
+		}
+	}
 	store := issuance.FileStore{Path: options.StatePath}
-	processLock, err := issuance.AcquireProcessLock(options.StatePath)
+	processLock, err := options.acquireLock(options.StatePath)
 	if err != nil {
 		return nil, err
 	}
@@ -72,16 +94,70 @@ func NewIssuer(options IssuerOptions) (*Issuer, error) {
 		return nil, err
 	}
 	keyID := manifest.KeyID(options.PrivateKey.Public().(ed25519.PublicKey))
-	if exists && state.KeyID != keyID {
-		_ = processLock.Close()
-		return nil, fmt.Errorf("issuer: state belongs to signing key %q, current key is %q", state.KeyID, keyID)
+	if exists && state.PolicyVersion == 0 {
+		previousGrant, _, grantErr := manifest.KeyPolicyGrant(options.KeyPolicy, state.KeyID, state.LastVersion)
+		if grantErr != nil {
+			_ = processLock.Close()
+			return nil, fmt.Errorf("issuer: legacy state key is not authorized by the offline-root policy: %w", grantErr)
+		}
+		state.KeyEpoch = previousGrant.Epoch
+		state.PolicyVersion = options.KeyPolicy.Version
+		state.PolicySHA256 = policyDigest
+		if err := store.Save(state); err != nil {
+			_ = processLock.Close()
+			return nil, fmt.Errorf("issuer: migrate legacy state to offline-root policy: %w", err)
+		}
 	}
+	nextVersion := uint64(1)
+	if exists {
+		if state.LastVersion == math.MaxUint64 {
+			_ = processLock.Close()
+			return nil, errors.New("issuer: manifest version space exhausted")
+		}
+		nextVersion = state.LastVersion + 1
+		if options.KeyPolicy.Version < state.PolicyVersion {
+			_ = processLock.Close()
+			return nil, fmt.Errorf("issuer: key policy version %d is older than durable policy %d", options.KeyPolicy.Version, state.PolicyVersion)
+		}
+		if options.KeyPolicy.Version == state.PolicyVersion && policyDigest != state.PolicySHA256 {
+			_ = processLock.Close()
+			return nil, errors.New("issuer: key policy changed without increasing its version")
+		}
+		if options.KeyPolicy.Version == state.PolicyVersion {
+			previousGrant, _, grantErr := manifest.KeyPolicyGrant(options.KeyPolicy, state.KeyID, state.LastVersion)
+			if grantErr != nil || previousGrant.Epoch != state.KeyEpoch {
+				_ = processLock.Close()
+				return nil, errors.New("issuer: durable signing state is inconsistent with the key policy")
+			}
+		}
+	}
+	grant, _, err := manifest.KeyPolicyGrant(options.KeyPolicy, keyID, nextVersion)
+	if err != nil {
+		_ = processLock.Close()
+		return nil, fmt.Errorf("issuer: current signing key is not authorized for the next version: %w", err)
+	}
+	if exists {
+		if keyID == state.KeyID && grant.Epoch != state.KeyEpoch {
+			_ = processLock.Close()
+			return nil, errors.New("issuer: signing key epoch changed without changing the key")
+		}
+		if keyID != state.KeyID && grant.Epoch <= state.KeyEpoch {
+			_ = processLock.Close()
+			return nil, errors.New("issuer: replacement signing key does not advance the durable epoch")
+		}
+	}
+	keyPolicy := options.KeyPolicy
+	keyPolicy.Keys = append([]manifest.KeyGrant(nil), options.KeyPolicy.Keys...)
 	return &Issuer{
 		catalogPath: options.CatalogPath,
 		ttl:         options.TTL,
 		cacheFor:    options.CacheFor,
-		privateKey:  options.PrivateKey,
+		privateKey:  append(ed25519.PrivateKey(nil), options.PrivateKey...),
 		keyID:       keyID,
+		keyEpoch:    grant.Epoch,
+		rootKey:     append(ed25519.PublicKey(nil), options.RootKey...),
+		keyPolicy:   keyPolicy,
+		policySHA:   policyDigest,
 		now:         options.Now,
 		loadCatalog: options.LoadCatalog,
 		stateStore:  store,
@@ -100,6 +176,9 @@ func (issuer *Issuer) Issue() (manifest.Envelope, error) {
 	}
 
 	now := issuer.now().UTC().Truncate(time.Second)
+	if issuer.state.LastVersion > 0 && now.Before(issuer.state.LastIssuedAt) {
+		return manifest.Envelope{}, errors.New("issuer: system clock moved behind the last issuance time")
+	}
 	if issuer.cached.Payload != "" && now.Before(issuer.cacheUntil) {
 		return issuer.cached, nil
 	}
@@ -162,12 +241,15 @@ func (issuer *Issuer) refresh(now time.Time) (manifest.Envelope, error) {
 		}
 	}
 	nextVersion := issuer.state.LastVersion + 1
-	envelope, err := manifest.Issue(catalogDocument, nextVersion, now, issuer.ttl, issuer.privateKey)
+	envelope, err := manifest.Issue(catalogDocument, nextVersion, issuer.keyPolicy, issuer.rootKey, now, issuer.ttl, issuer.privateKey)
 	if err != nil {
 		return manifest.Envelope{}, fmt.Errorf("issuer: sign manifest: %w", err)
 	}
 	nextState := issuance.State{
 		KeyID:           issuer.keyID,
+		KeyEpoch:        issuer.keyEpoch,
+		PolicyVersion:   issuer.keyPolicy.Version,
+		PolicySHA256:    issuer.policySHA,
 		LastVersion:     nextVersion,
 		CatalogRevision: catalogDocument.Revision,
 		CatalogSHA256:   catalogDigest,
