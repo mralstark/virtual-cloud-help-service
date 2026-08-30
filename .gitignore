@@ -1,0 +1,16 @@
+.local/
+.env
+.env.*
+!.env.example
+bin/
+coverage.out
+*.test
+*.log
+*.tfstate
+*.tfstate.*
+.terraform/
+crash.log
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
