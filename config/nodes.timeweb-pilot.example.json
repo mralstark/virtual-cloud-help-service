@@ -1,0 +1,36 @@
+{
+  "revision": 1,
+  "discovery": [
+    {
+      "id": "timeweb-pilot-control",
+      "url": "https://control.pilot.example.invalid/v1/manifest",
+      "priority": 10
+    }
+  ],
+  "nodes": [
+    {
+      "id": "timeweb-fra-pilot-1",
+      "region": "de-fra",
+      "country_code": "DE",
+      "provider": "timeweb-cloud",
+      "asn": 64496,
+      "endpoints": [
+        {
+          "id": "timeweb-fra-pilot-1-awg",
+          "transport": "amneziawg",
+          "address": "vpn.pilot.example.invalid:51820",
+          "credential_ref": "device-timeweb-pilot-awg",
+          "priority": 10
+        },
+        {
+          "id": "timeweb-fra-pilot-1-reality",
+          "transport": "vless-reality",
+          "address": "vpn.pilot.example.invalid:443",
+          "server_name": "cover.pilot.example.invalid",
+          "credential_ref": "device-timeweb-pilot-reality",
+          "priority": 20
+        }
+      ]
+    }
+  ]
+}

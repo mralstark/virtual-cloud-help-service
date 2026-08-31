@@ -31,6 +31,8 @@ green unit-test run as authorization to launch for users.
   uninstall cleanup tests on every supported OS.
 - [ ] Add consented full-transfer probes and complete the Russian operator/region
   field matrix. A handshake-only check is not sufficient.
+- [ ] Integrate the probe-evidence classifier with real client networking. The pure
+  classifier does not itself detect censorship or prove a strict allowlist.
 - [ ] Add reproducible infrastructure, secret-manager integration, encrypted atomic
   backup/restore, alerting, SLOs, capacity limits, and disaster exercises.
 - [ ] Replace the file state store with transactional compare-and-swap before any HA

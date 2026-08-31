@@ -131,10 +131,12 @@ func mostDiverse(candidates []scoredCandidate, seenProviders map[string]struct{}
 type FailureClass string
 
 const (
+	FailureNone      FailureClass = ""
 	FailureDNS       FailureClass = "dns"
 	FailureHandshake FailureClass = "handshake"
 	FailureTransfer  FailureClass = "transfer"
 	FailureSuspected FailureClass = "suspected-censorship"
+	FailureAllowlist FailureClass = "suspected-allowlist"
 )
 
 // Cooldown returns an exponential, capped delay. The caller adds up to 20 percent
@@ -170,6 +172,8 @@ func cooldownBounds(class FailureClass) (time.Duration, time.Duration, error) {
 		return 30 * time.Second, 15 * time.Minute, nil
 	case FailureSuspected:
 		return 2 * time.Minute, 30 * time.Minute, nil
+	case FailureAllowlist:
+		return 15 * time.Minute, 6 * time.Hour, nil
 	default:
 		return 0, 0, errors.New("selector: unknown failure class")
 	}
