@@ -1,7 +1,17 @@
 variable "project_name" {
-  description = "Timeweb project name for the disposable pilot."
+  description = "Stable label used for the pilot resources."
   type        = string
   default     = "acvpn-frankfurt-pilot"
+}
+
+variable "timeweb_project_id" {
+  description = "Existing Timeweb project ID. Reusing a project keeps the API token project-scoped."
+  type        = number
+
+  validation {
+    condition     = var.timeweb_project_id > 0 && floor(var.timeweb_project_id) == var.timeweb_project_id
+    error_message = "timeweb_project_id must be a positive integer."
+  }
 }
 
 variable "server_name" {

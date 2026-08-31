@@ -1,17 +1,14 @@
 data "twc_configurator" "frankfurt" {
-  location    = "de-1"
-  preset_type = "standard"
+  location = "de-1"
+  # Frankfurt currently exposes the Premium configurator. The availability zone
+  # remains fra-1 on the server resource.
+  preset_type = "premium"
 }
 
 data "twc_os" "ubuntu" {
   family  = "linux"
   name    = "ubuntu"
   version = "24.04"
-}
-
-resource "twc_project" "pilot" {
-  name        = var.project_name
-  description = "Disposable Frankfurt pilot; no production user traffic"
 }
 
 resource "twc_ssh_key" "pilot" {
@@ -24,12 +21,11 @@ resource "twc_server" "pilot" {
   name                      = var.server_name
   hostname                  = var.server_name
   comment                   = "Disposable allowlist/DPI-resilience pilot"
-  project_id                = twc_project.pilot.id
+  project_id                = var.timeweb_project_id
   os_id                     = data.twc_os.ubuntu.id
   availability_zone         = "fra-1"
   ssh_keys_ids              = [twc_ssh_key.pilot.id]
   is_root_password_required = false
-  is_ddos_guard             = true
   cloud_init                = templatefile("${path.module}/cloud-init.yaml.tftpl", { admin_cidr = var.admin_cidr })
 
   configuration {

@@ -10,7 +10,9 @@ allows the pilot IP or domain.
 ## Required inputs
 
 - a Timeweb account with a reviewed balance and spending owner;
-- a short-lived, least-privilege API token supplied as `TWC_TOKEN`;
+- an existing, dedicated Timeweb project;
+- a short-lived API token scoped to that project, with cloud-server and network
+  management only, supplied as `TWC_TOKEN`;
 - a dedicated Ed25519 SSH public key;
 - the operator's current public IPv4 `/32` for administration;
 - an operator-controlled domain whose A record can be changed for the pilot;
@@ -22,13 +24,15 @@ or the repository.
 
 ## Pre-deployment gate
 
-1. Review the current Timeweb price for the exact `fra-1` configuration and DDoS
-   option. Terraform's resource guard permits at most 2 vCPU, 4 GiB RAM, and 40 GiB
-   disk unless code review explicitly changes it.
+1. Review the current Timeweb price for the exact `fra-1` configuration and confirm
+   the zone has immediately available capacity rather than a preorder queue.
+   Timeweb's managed cloud-server DDoS option is not available in Frankfurt and
+   must remain disabled. Terraform's resource guard permits at most 2 vCPU, 4 GiB
+   RAM, and 40 GiB disk unless code review explicitly changes it.
 2. Run `terraform init`, `terraform fmt -check`, `terraform validate`, and
    `terraform plan`. Save no plan file containing sensitive provider values.
-3. Confirm the plan creates one project, one SSH public key, one server, and one
-   firewall attachment only.
+3. Confirm the plan reuses the reviewed project and creates one SSH public key, one
+   server, and one firewall attachment only. It must not create another project.
 4. Obtain explicit approval before `terraform apply`; it creates billable resources.
 5. Confirm the cloud firewall policy in the Timeweb panel. The host nftables policy
    is DROP and permits SSH only from the configured `/32`, UDP/51820, and TCP/80/443.

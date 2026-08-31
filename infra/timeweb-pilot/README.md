@@ -7,19 +7,26 @@ always requires the account owner's explicit approval.
 ## Security boundaries
 
 - Use a dedicated Ed25519 SSH key and a single trusted IPv4 `/32` admin CIDR.
-- Supply the least-privilege, short-lived API token only as `TWC_TOKEN`.
+- Reuse a dedicated existing Timeweb project and scope the API token to that project.
+- Supply the least-privilege, short-lived API token only as `TWC_TOKEN`; cloud
+  server and network management are sufficient for this stack.
 - Never put a token, private key, real IP, or domain secret in this directory.
 - Review the generated plan and current Timeweb price before applying it.
+- Confirm `fra-1` has immediately available capacity. Do not apply while the panel
+  offers only a preorder unless the owner explicitly accepts an unbounded wait.
 - The cloud-init file installs only host hardening. It deliberately does not fetch
   unpinned VPN binaries from the Internet.
 - The attached Timeweb firewall does not replace nftables. Confirm its default DROP
   policy and rules in the panel before exposing the host.
+- Timeweb's managed cloud-server DDoS option is not available in Frankfurt. The
+  pilot must not set `is_ddos_guard`; use the cloud firewall and host controls and
+  record this limitation in the demonstration report.
 
 ## Validate without creating resources
 
 ```powershell
 Copy-Item terraform.tfvars.example terraform.tfvars
-# Replace the example path and CIDR with local values.
+# Replace the example path, CIDR, and existing Timeweb project ID with local values.
 $env:TWC_TOKEN = '<short-lived-token>'
 terraform init
 terraform fmt -check
@@ -27,7 +34,7 @@ terraform validate
 terraform plan
 ```
 
-Do not run `terraform apply` until the plan, monthly price, location, DDoS option,
+Do not run `terraform apply` until the plan, monthly price, location, DDoS limitation,
 firewall behavior, and deletion policy have been reviewed. A strict destination
 allowlist still requires the customer or network operator to approve the resulting
 IP/domain.
