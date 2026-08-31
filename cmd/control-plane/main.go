@@ -20,6 +20,8 @@ import (
 	"github.com/mralstark/virtual-cloud-help-service/internal/pilotaccess"
 	pilotpostgres "github.com/mralstark/virtual-cloud-help-service/internal/pilotaccess/postgres"
 	"github.com/mralstark/virtual-cloud-help-service/internal/pilotapi"
+	"github.com/mralstark/virtual-cloud-help-service/internal/pilottelemetry"
+	telemetrypostgres "github.com/mralstark/virtual-cloud-help-service/internal/pilottelemetry/postgres"
 	"github.com/mralstark/virtual-cloud-help-service/internal/service"
 	"github.com/mralstark/virtual-cloud-help-service/internal/signingkey"
 )
@@ -86,8 +88,17 @@ func run(logger *log.Logger) error {
 		if err != nil {
 			return err
 		}
+		telemetryStore, err := telemetrypostgres.New(database)
+		if err != nil {
+			return err
+		}
 		checkContext, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		err = store.CheckSchema(checkContext)
+		if err != nil {
+			cancel()
+			return err
+		}
+		err = telemetryStore.CheckSchema(checkContext)
 		cancel()
 		if err != nil {
 			return err
@@ -96,7 +107,11 @@ func run(logger *log.Logger) error {
 		if err != nil {
 			return err
 		}
-		adminHandler, err := pilotapi.New(accessService, cfg.PilotAdminToken, logger)
+		telemetryService, err := pilottelemetry.NewService(telemetryStore, time.Now, nil, nil)
+		if err != nil {
+			return err
+		}
+		adminHandler, err := pilotapi.NewWithTelemetry(accessService, telemetryService, cfg.PilotAdminToken, logger)
 		if err != nil {
 			return err
 		}

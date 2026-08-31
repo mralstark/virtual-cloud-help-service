@@ -104,16 +104,22 @@ installs them. See [ADR 0004](docs/adr/0004-pinned-pilot-data-plane.md).
 | `PILOT_ADMIN_TOKEN` | disabled | 32–512 byte bearer token for the loopback/private pilot admin API |
 
 `DATABASE_URL` and `PILOT_ADMIN_TOKEN` must be set together. Apply
-`migrations/000001_initial.sql` and `migrations/000002_pilot_vpn_access.sql` before
-enabling them. The service then verifies the schema at startup and exposes:
+all migrations in numeric order through `migrations/000003_pilot_test_results.sql`
+before enabling them. The service then verifies the schema at startup and exposes:
 
 - `POST /admin/pilot/access` to record metadata for access created manually in
   official AmneziaVPN;
 - `POST /admin/pilot/access/{id}/revoke` to mark that record revoked.
+- `POST /admin/pilot/test-results` to record a coarse, privacy-safe acceptance result;
+- `GET /admin/pilot/report` to export transport success rates, failure stages,
+  optional ISP failure counts, active users/devices, and optional current server
+  metrics.
 
 Keep these routes on loopback or an authenticated private edge. The API accepts an
 opaque external reference, not a connection profile or private client key. Use
 `.env.example` only as a variable-name template; never commit real values.
+Test results intentionally have no fields for URLs, destination domains, DNS
+history, traffic contents, or client public IP addresses.
 
 The service should normally listen on a private interface behind a hardened HTTPS
 reverse proxy. The private signing key must be mounted read-only as a secret and

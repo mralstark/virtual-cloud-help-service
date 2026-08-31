@@ -63,14 +63,14 @@ type Inventory struct {
 }
 
 type Metrics struct {
-	CPUPercent            float64
-	MemoryTotalBytes      uint64
-	MemoryUsedBytes       uint64
-	NetworkRXBytes        uint64
-	NetworkTXBytes        uint64
-	ActiveConnectionCount *uint64
-	ConfigRevision        string
-	ObservedAt            time.Time
+	CPUPercent            float64   `json:"cpu_percent"`
+	MemoryTotalBytes      uint64    `json:"memory_total_bytes"`
+	MemoryUsedBytes       uint64    `json:"memory_used_bytes"`
+	NetworkRXBytes        uint64    `json:"network_rx_bytes"`
+	NetworkTXBytes        uint64    `json:"network_tx_bytes"`
+	ActiveConnectionCount *uint64   `json:"active_connection_count,omitempty"`
+	ConfigRevision        string    `json:"config_revision,omitempty"`
+	ObservedAt            time.Time `json:"observed_at"`
 }
 
 // Node exposes provider-independent, read-only pilot operations. Provisioning and
