@@ -52,6 +52,35 @@ func TestLoadPilotAccessRequiresPairedSecrets(t *testing.T) {
 	}
 }
 
+func TestLoadPilotAccessRejectsPublicOrWildcardListener(t *testing.T) {
+	for _, address := range []string{"0.0.0.0:8080", "[::]:8080", "203.0.113.10:8080", "public.example:8080"} {
+		t.Run(address, func(t *testing.T) {
+			t.Setenv("MANIFEST_SIGNING_KEY_PATH", "key")
+			t.Setenv("MANIFEST_ROOT_PUBLIC_KEY_PATH", "root.pub")
+			t.Setenv("MANIFEST_KEY_POLICY_PATH", "policy.json")
+			t.Setenv("MANIFEST_STATE_PATH", "state.json")
+			t.Setenv("DATABASE_URL", "postgres://pilot")
+			t.Setenv("PILOT_ADMIN_TOKEN", "0123456789abcdef0123456789abcdef")
+			t.Setenv("LISTEN_ADDRESS", address)
+			if _, err := Load(); err == nil {
+				t.Fatalf("Load accepted public pilot listener %q", address)
+			}
+		})
+	}
+}
+
+func TestLoadRejectsExampleAdminToken(t *testing.T) {
+	t.Setenv("MANIFEST_SIGNING_KEY_PATH", "key")
+	t.Setenv("MANIFEST_ROOT_PUBLIC_KEY_PATH", "root.pub")
+	t.Setenv("MANIFEST_KEY_POLICY_PATH", "policy.json")
+	t.Setenv("MANIFEST_STATE_PATH", "state.json")
+	t.Setenv("DATABASE_URL", "postgres://pilot")
+	t.Setenv("PILOT_ADMIN_TOKEN", "replace-with-at-least-32-random-characters")
+	if _, err := Load(); err == nil {
+		t.Fatal("Load accepted the example admin token")
+	}
+}
+
 func TestLoadRequiresKeyAndBoundsDurations(t *testing.T) {
 	t.Setenv("MANIFEST_SIGNING_KEY_PATH", "")
 	if _, err := Load(); err == nil {

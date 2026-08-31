@@ -14,6 +14,7 @@ import (
 const maxCatalogBytes = 1 << 20
 
 func LoadFile(path string) (manifest.Catalog, error) {
+	// #nosec G304 -- the catalog path is trusted process configuration, not request data.
 	file, err := os.Open(path)
 	if err != nil {
 		return manifest.Catalog{}, fmt.Errorf("open catalog: %w", err)

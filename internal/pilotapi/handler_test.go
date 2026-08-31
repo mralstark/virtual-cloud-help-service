@@ -105,6 +105,12 @@ func TestNewRejectsWhitespaceInAdminToken(t *testing.T) {
 	}
 }
 
+func TestNewRejectsExampleAdminToken(t *testing.T) {
+	if _, err := New(&fakeService{}, "replace-with-at-least-32-random-characters", nil); err == nil {
+		t.Fatal("New accepted the example admin token")
+	}
+}
+
 func TestTelemetryEndpointsAreAuthenticatedAndOptional(t *testing.T) {
 	now := time.Date(2026, 8, 31, 12, 0, 0, 0, time.UTC)
 	telemetry := &fakeTelemetry{

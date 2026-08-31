@@ -70,6 +70,7 @@ func TestRecordRejectsInconsistentOrOldResult(t *testing.T) {
 		t.Fatal(err)
 	}
 	stage := FailureDNS
+	clientIP := "203.0.113.25"
 	for _, input := range []RecordInput{
 		{
 			DeviceID: testDeviceID, ClientPlatform: PlatformAndroid,
@@ -79,6 +80,11 @@ func TestRecordRejectsInconsistentOrOldResult(t *testing.T) {
 		{
 			DeviceID: testDeviceID, ClientPlatform: PlatformAndroid,
 			Transport: vpnnode.TransportAmneziaWG, OccurredAt: now.Add(-31 * 24 * time.Hour), Success: true,
+			ConnectionTimeBucket: ConnectionLT3S,
+		},
+		{
+			DeviceID: testDeviceID, ClientPlatform: PlatformAndroid, ISP: &clientIP,
+			Transport: vpnnode.TransportAmneziaWG, OccurredAt: now, Success: true,
 			ConnectionTimeBucket: ConnectionLT3S,
 		},
 	} {

@@ -18,6 +18,7 @@ func LoadPrivate(path string) (ed25519.PrivateKey, error) {
 	if runtime.GOOS != "linux" {
 		return nil, errors.New("signing key loading is supported only on Linux")
 	}
+	// #nosec G304 -- the key path is trusted operator configuration, never request input.
 	file, err := os.Open(path)
 	if err != nil {
 		return nil, fmt.Errorf("open signing key: %w", err)
@@ -59,6 +60,7 @@ func LoadPrivate(path string) (ed25519.PrivateKey, error) {
 }
 
 func LoadPublic(path string) (ed25519.PublicKey, error) {
+	// #nosec G304 -- the public-key path is trusted operator configuration.
 	file, err := os.Open(path)
 	if err != nil {
 		return nil, fmt.Errorf("open public key: %w", err)
@@ -136,6 +138,7 @@ func ensureParent(path string, mode os.FileMode) error {
 }
 
 func writeExclusive(path string, contents []byte, mode os.FileMode) error {
+	// #nosec G304 -- the exclusive output path is supplied by the trusted key operator.
 	file, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, mode)
 	if err != nil {
 		return err

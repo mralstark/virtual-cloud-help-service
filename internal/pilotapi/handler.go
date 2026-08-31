@@ -97,6 +97,9 @@ func NewWithTelemetry(service AccessService, telemetry TelemetryService, token s
 	if len(token) < 32 || len(token) > 512 {
 		return nil, errors.New("pilot API: admin token must contain between 32 and 512 bytes")
 	}
+	if strings.Contains(strings.ToLower(token), "replace-with") {
+		return nil, errors.New("pilot API: admin token must not contain the example placeholder")
+	}
 	if strings.IndexFunc(token, func(character rune) bool { return character <= ' ' || character == 127 }) >= 0 {
 		return nil, errors.New("pilot API: admin token must not contain whitespace or control characters")
 	}

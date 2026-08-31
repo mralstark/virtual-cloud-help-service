@@ -227,6 +227,10 @@ func (service *Service) Report(ctx context.Context) (Report, error) {
 		FailuresByISP:       append([]ISPFailure{}, aggregate.FailuresByISP...),
 		ServerMetricsStatus: MetricsNotConfigured,
 	}
+	if (report.FirstTestAt == nil) != (report.LastTestAt == nil) ||
+		(report.FirstTestAt != nil && report.LastTestAt.Before(*report.FirstTestAt)) {
+		return Report{}, fmt.Errorf("pilot telemetry: store returned invalid test period")
+	}
 	for index := range report.Transports {
 		summary := &report.Transports[index]
 		if err := vpnnode.ValidateTransport(summary.Transport); err != nil || summary.Successes > summary.Tests {

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"net"
 	"regexp"
 	"sort"
@@ -194,7 +195,7 @@ func ValidateMetrics(value Metrics) error {
 	if value.ObservedAt.IsZero() {
 		return errors.New("vpnnode: metrics observation time is required")
 	}
-	if value.CPUPercent < 0 || value.CPUPercent > 100 {
+	if math.IsNaN(value.CPUPercent) || math.IsInf(value.CPUPercent, 0) || value.CPUPercent < 0 || value.CPUPercent > 100 {
 		return errors.New("vpnnode: CPU percent must be between 0 and 100")
 	}
 	if value.MemoryTotalBytes == 0 || value.MemoryUsedBytes > value.MemoryTotalBytes {

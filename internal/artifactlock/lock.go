@@ -45,6 +45,7 @@ type Artifact struct {
 }
 
 func Load(path string) (Lock, error) {
+	// #nosec G304 -- the lock path is an operator-supplied CLI/configuration path.
 	file, err := os.Open(path)
 	if err != nil {
 		return Lock{}, fmt.Errorf("artifact lock: open: %w", err)

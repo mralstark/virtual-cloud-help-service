@@ -2,16 +2,20 @@ package main
 
 import (
 	"context"
+	"crypto/tls"
 	"database/sql"
 	"errors"
 	"fmt"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	_ "github.com/jackc/pgx/v5/stdlib"
 
 	"github.com/mralstark/virtual-cloud-help-service/internal/api"
@@ -115,7 +119,15 @@ func run(logger *log.Logger) error {
 		if err != nil {
 			return err
 		}
-		httpHandler = api.NewWithPilotAdmin(issuer.Issue, logger, cfg.MaxInFlight, adminHandler)
+		databaseReady := func(ctx context.Context) error {
+			pingContext, cancel := context.WithTimeout(ctx, 2*time.Second)
+			defer cancel()
+			if err := database.PingContext(pingContext); err != nil {
+				return errors.New("pilot database unavailable")
+			}
+			return nil
+		}
+		httpHandler = api.NewWithPilotAdminAndReadiness(issuer.Issue, logger, cfg.MaxInFlight, adminHandler, databaseReady)
 	}
 
 	server := &http.Server{
@@ -157,6 +169,9 @@ func run(logger *log.Logger) error {
 }
 
 func openPilotDatabase(databaseURL string) (*sql.DB, error) {
+	if err := validateDatabaseTransport(databaseURL); err != nil {
+		return nil, err
+	}
 	database, err := sql.Open("pgx", databaseURL)
 	if err != nil {
 		return nil, fmt.Errorf("open pilot database: %w", err)
@@ -172,4 +187,31 @@ func openPilotDatabase(databaseURL string) (*sql.DB, error) {
 		return nil, fmt.Errorf("connect pilot database: %w", err)
 	}
 	return database, nil
+}
+
+func validateDatabaseTransport(databaseURL string) error {
+	connectionConfig, err := pgx.ParseConfig(databaseURL)
+	if err != nil {
+		return errors.New("invalid DATABASE_URL")
+	}
+	if !secureDatabaseEndpoint(connectionConfig.Host, connectionConfig.TLSConfig) {
+		return errors.New("remote PostgreSQL connections require certificate-verified TLS without a plaintext fallback")
+	}
+	for _, fallback := range connectionConfig.Fallbacks {
+		if !secureDatabaseEndpoint(fallback.Host, fallback.TLSConfig) {
+			return errors.New("remote PostgreSQL connections require certificate-verified TLS without a plaintext fallback")
+		}
+	}
+	return nil
+}
+
+func secureDatabaseEndpoint(host string, tlsConfig *tls.Config) bool {
+	if strings.HasPrefix(host, "/") || strings.EqualFold(host, "localhost") {
+		return true
+	}
+	ip := net.ParseIP(host)
+	if ip != nil && ip.IsLoopback() {
+		return true
+	}
+	return tlsConfig != nil && !tlsConfig.InsecureSkipVerify && tlsConfig.ServerName != ""
 }

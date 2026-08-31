@@ -1,6 +1,7 @@
 package vpnnode
 
 import (
+	"math"
 	"testing"
 	"time"
 )
@@ -76,5 +77,17 @@ func TestValidateMetricsRejectsImpossibleMemory(t *testing.T) {
 	})
 	if err == nil {
 		t.Fatal("expected invalid metrics")
+	}
+}
+
+func TestValidateMetricsRejectsNonFiniteCPU(t *testing.T) {
+	for _, cpu := range []float64{math.NaN(), math.Inf(1), math.Inf(-1)} {
+		err := ValidateMetrics(Metrics{
+			CPUPercent: cpu, MemoryTotalBytes: 10, MemoryUsedBytes: 5,
+			ObservedAt: time.Now().UTC(),
+		})
+		if err == nil {
+			t.Fatalf("accepted non-finite CPU value %v", cpu)
+		}
 	}
 }

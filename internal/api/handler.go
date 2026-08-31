@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"log"
 	"net/http"
@@ -9,22 +10,38 @@ import (
 )
 
 type IssueFunc func() (manifest.Envelope, error)
+type ReadinessFunc func(context.Context) error
 
 type Handler struct {
 	issue  IssueFunc
 	logger *log.Logger
 	limit  chan struct{}
+	checks []ReadinessFunc
 }
 
 func New(issue IssueFunc, logger *log.Logger, maxInFlight int) http.Handler {
-	return NewWithPilotAdmin(issue, logger, maxInFlight, nil)
+	return newHandler(issue, logger, maxInFlight, nil, nil)
 }
 
 func NewWithPilotAdmin(issue IssueFunc, logger *log.Logger, maxInFlight int, pilotAdmin http.Handler) http.Handler {
+	return newHandler(issue, logger, maxInFlight, pilotAdmin, nil)
+}
+
+func NewWithPilotAdminAndReadiness(issue IssueFunc, logger *log.Logger, maxInFlight int, pilotAdmin http.Handler, checks ...ReadinessFunc) http.Handler {
+	return newHandler(issue, logger, maxInFlight, pilotAdmin, checks)
+}
+
+func newHandler(issue IssueFunc, logger *log.Logger, maxInFlight int, pilotAdmin http.Handler, checks []ReadinessFunc) http.Handler {
 	if maxInFlight < 1 {
 		maxInFlight = 1
 	}
-	handler := &Handler{issue: issue, logger: logger, limit: make(chan struct{}, maxInFlight)}
+	validChecks := make([]ReadinessFunc, 0, len(checks))
+	for _, check := range checks {
+		if check != nil {
+			validChecks = append(validChecks, check)
+		}
+	}
+	handler := &Handler{issue: issue, logger: logger, limit: make(chan struct{}, maxInFlight), checks: validChecks}
 	mux := http.NewServeMux()
 	mux.HandleFunc("/healthz", handler.health)
 	mux.HandleFunc("/readyz", handler.ready)
@@ -54,6 +71,13 @@ func (handler *Handler) ready(writer http.ResponseWriter, request *http.Request)
 		handler.logError("readiness check failed", err)
 		writeText(writer, request, http.StatusServiceUnavailable, "not ready\n")
 		return
+	}
+	for _, check := range handler.checks {
+		if err := check(request.Context()); err != nil {
+			handler.logError("readiness dependency failed", err)
+			writeText(writer, request, http.StatusServiceUnavailable, "not ready\n")
+			return
+		}
 	}
 	writeText(writer, request, http.StatusOK, "ready\n")
 }

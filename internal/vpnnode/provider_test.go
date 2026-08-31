@@ -28,4 +28,7 @@ func TestValidateProviderTypesRejectUnsafeBounds(t *testing.T) {
 	if err := ValidatePublicIP(PublicIP{ID: "ip-1", Address: netip.IPv4Unspecified()}); err == nil {
 		t.Fatal("accepted an unspecified address")
 	}
+	if err := ValidatePublicIP(PublicIP{ID: "ip-1", Address: netip.MustParseAddr("10.0.0.1")}); err == nil {
+		t.Fatal("accepted a private address as public")
+	}
 }

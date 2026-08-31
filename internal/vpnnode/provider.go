@@ -84,7 +84,8 @@ func ValidateNodeRecord(record NodeRecord) error {
 }
 
 func ValidatePublicIP(value PublicIP) error {
-	if value.ID == "" || len(value.ID) > 128 || !value.Address.IsValid() || value.Address.IsUnspecified() {
+	if value.ID == "" || len(value.ID) > 128 || !value.Address.IsValid() || value.Address.IsUnspecified() ||
+		value.Address.IsPrivate() || value.Address.IsLoopback() || value.Address.IsLinkLocalUnicast() {
 		return errors.New("vpnnode: public IP is invalid")
 	}
 	return nil

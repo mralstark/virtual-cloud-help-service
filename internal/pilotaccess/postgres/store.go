@@ -2,6 +2,7 @@ package postgres
 
 import (
 	"context"
+	"crypto/rand"
 	"database/sql"
 	"errors"
 	"fmt"
@@ -14,14 +15,22 @@ import (
 )
 
 type Store struct {
-	db *sql.DB
+	db         *sql.DB
+	newAuditID func() (string, error)
 }
 
 func New(db *sql.DB) (*Store, error) {
+	return NewWithIDGenerator(db, newUUID)
+}
+
+func NewWithIDGenerator(db *sql.DB, newAuditID func() (string, error)) (*Store, error) {
 	if db == nil {
 		return nil, errors.New("pilot access postgres: database is required")
 	}
-	return &Store{db: db}, nil
+	if newAuditID == nil {
+		return nil, errors.New("pilot access postgres: audit ID generator is required")
+	}
+	return &Store{db: db, newAuditID: newAuditID}, nil
 }
 
 func (store *Store) CheckSchema(ctx context.Context) error {
@@ -37,7 +46,16 @@ func (store *Store) CheckSchema(ctx context.Context) error {
 }
 
 func (store *Store) Create(ctx context.Context, access pilotaccess.Access) (pilotaccess.Access, error) {
-	row := store.db.QueryRowContext(ctx, `
+	auditID, err := store.newAuditID()
+	if err != nil {
+		return pilotaccess.Access{}, fmt.Errorf("pilot access postgres: generate audit ID: %w", err)
+	}
+	transaction, err := store.db.BeginTx(ctx, nil)
+	if err != nil {
+		return pilotaccess.Access{}, fmt.Errorf("pilot access postgres: begin create: %w", err)
+	}
+	defer transaction.Rollback()
+	row := transaction.QueryRowContext(ctx, `
 		INSERT INTO vpn_accesses (
 			id, device_id, node_id, transport, external_reference,
 			created_at, expires_at, revoked_at, status
@@ -52,11 +70,32 @@ func (store *Store) Create(ctx context.Context, access pilotaccess.Access) (pilo
 	if err != nil {
 		return pilotaccess.Access{}, classify("create", err)
 	}
+	if _, err := transaction.ExecContext(ctx, `
+		INSERT INTO admin_audit_events (
+			id, actor, action, object_type, object_id, metadata
+		) VALUES (
+			$1, 'pilot-admin-api', 'pilot_access_registered', 'vpn_access', $2,
+			jsonb_build_object('node_id', $3, 'transport', $4, 'expires_at', $5)
+		)`, auditID, result.ID, result.NodeID, result.Transport, result.ExpiresAt); err != nil {
+		return pilotaccess.Access{}, fmt.Errorf("pilot access postgres: audit create: %w", err)
+	}
+	if err := transaction.Commit(); err != nil {
+		return pilotaccess.Access{}, fmt.Errorf("pilot access postgres: commit create: %w", err)
+	}
 	return result, nil
 }
 
 func (store *Store) Revoke(ctx context.Context, id string, at time.Time) (pilotaccess.Access, error) {
-	row := store.db.QueryRowContext(ctx, `
+	auditID, err := store.newAuditID()
+	if err != nil {
+		return pilotaccess.Access{}, fmt.Errorf("pilot access postgres: generate audit ID: %w", err)
+	}
+	transaction, err := store.db.BeginTx(ctx, nil)
+	if err != nil {
+		return pilotaccess.Access{}, fmt.Errorf("pilot access postgres: begin revoke: %w", err)
+	}
+	defer transaction.Rollback()
+	row := transaction.QueryRowContext(ctx, `
 		UPDATE vpn_accesses
 		SET status = 'revoked', revoked_at = COALESCE(revoked_at, $2)
 		WHERE id = $1
@@ -65,6 +104,14 @@ func (store *Store) Revoke(ctx context.Context, id string, at time.Time) (pilota
 	result, err := scan(row)
 	if err != nil {
 		return pilotaccess.Access{}, classify("revoke", err)
+	}
+	if _, err := transaction.ExecContext(ctx, `
+		INSERT INTO admin_audit_events (id, actor, action, object_type, object_id)
+		VALUES ($1, 'pilot-admin-api', 'pilot_access_revoked', 'vpn_access', $2)`, auditID, result.ID); err != nil {
+		return pilotaccess.Access{}, fmt.Errorf("pilot access postgres: audit revoke: %w", err)
+	}
+	if err := transaction.Commit(); err != nil {
+		return pilotaccess.Access{}, fmt.Errorf("pilot access postgres: commit revoke: %w", err)
 	}
 	return result, nil
 }
@@ -113,4 +160,15 @@ func classify(operation string, err error) error {
 		}
 	}
 	return fmt.Errorf("pilot access postgres: %s: %w", operation, err)
+}
+
+func newUUID() (string, error) {
+	var raw [16]byte
+	if _, err := rand.Read(raw[:]); err != nil {
+		return "", err
+	}
+	raw[6] = (raw[6] & 0x0f) | 0x40
+	raw[8] = (raw[8] & 0x3f) | 0x80
+	return fmt.Sprintf("%08x-%04x-%04x-%04x-%012x",
+		raw[0:4], raw[4:6], raw[6:8], raw[8:10], raw[10:16]), nil
 }

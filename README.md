@@ -120,6 +120,15 @@ opaque external reference, not a connection profile or private client key. Use
 `.env.example` only as a variable-name template; never commit real values.
 Test results intentionally have no fields for URLs, destination domains, DNS
 history, traffic contents, or client public IP addresses.
+When pilot access is enabled, startup rejects wildcard, hostname, and public-IP
+`LISTEN_ADDRESS` values. Remote PostgreSQL endpoints must use TLS with no plaintext
+fallback; loopback and Unix-socket database connections may be plaintext.
+Access registration/revocation and their `admin_audit_events` rows commit in one
+transaction, so an unavailable audit sink fails the mutation closed.
+Generate the admin token with a cryptographic RNG (for example,
+`openssl rand -base64 32`). For a remote database use `sslmode=verify-full` and an
+approved CA; `sslmode=require` is rejected because it encrypts without proving the
+server identity.
 
 The service should normally listen on a private interface behind a hardened HTTPS
 reverse proxy. The private signing key must be mounted read-only as a secret and

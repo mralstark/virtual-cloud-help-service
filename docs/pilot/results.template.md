@@ -22,6 +22,8 @@ The admin report provides transport rates, optional ISP failure aggregates, acti
 devices, test period, and current node metrics when an observed node is configured.
 Peak utilization and support incidents must come from the approved private
 monitoring/incident records; do not infer them from a current sample.
+ISP groups with fewer than two failed tests are suppressed by the report to reduce
+single-tester disclosure risk.
 
 ## Recommendation
 

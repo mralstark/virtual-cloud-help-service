@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"errors"
 	"io"
 	"net/http"
@@ -111,5 +112,23 @@ func TestPilotAdminHandlerIsMountedOnlyWhenConfigured(t *testing.T) {
 	disabled.ServeHTTP(disabledResponse, httptest.NewRequest(http.MethodPost, "/admin/pilot/access", nil))
 	if disabledResponse.Code != http.StatusNotFound {
 		t.Fatalf("disabled admin status = %d", disabledResponse.Code)
+	}
+}
+
+func TestReadinessChecksDependenciesWithoutBlockingManifest(t *testing.T) {
+	dependencyErr := errors.New("database unavailable")
+	handler := NewWithPilotAdminAndReadiness(
+		func() (manifest.Envelope, error) { return manifest.Envelope{}, nil }, nil, 1, nil,
+		func(context.Context) error { return dependencyErr },
+	)
+	readyResponse := httptest.NewRecorder()
+	handler.ServeHTTP(readyResponse, httptest.NewRequest(http.MethodGet, "/readyz", nil))
+	if readyResponse.Code != http.StatusServiceUnavailable {
+		t.Fatalf("readiness status = %d", readyResponse.Code)
+	}
+	manifestResponse := httptest.NewRecorder()
+	handler.ServeHTTP(manifestResponse, httptest.NewRequest(http.MethodGet, "/v1/manifest", nil))
+	if manifestResponse.Code != http.StatusOK {
+		t.Fatalf("manifest status = %d", manifestResponse.Code)
 	}
 }

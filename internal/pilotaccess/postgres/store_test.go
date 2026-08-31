@@ -20,22 +20,37 @@ var accessColumns = []string{
 	"created_at", "expires_at", "revoked_at", "status",
 }
 
+const (
+	auditID1 = "018f5962-9d2a-4ea2-8f6d-9c2e8b6bffa1"
+	auditID2 = "018f5962-9d2a-4ea2-8f6d-9c2e8b6bffa2"
+)
+
 func TestCreateAndIdempotentRevoke(t *testing.T) {
 	database, mock, err := sqlmock.New(sqlmock.QueryMatcherOption(sqlmock.QueryMatcherRegexp))
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer database.Close()
-	store, err := New(database)
+	auditIDs := []string{auditID1, auditID2}
+	store, err := NewWithIDGenerator(database, func() (string, error) {
+		result := auditIDs[0]
+		auditIDs = auditIDs[1:]
+		return result, nil
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	access := postgresTestAccess()
+	mock.ExpectBegin()
 	mock.ExpectQuery(regexp.QuoteMeta("INSERT INTO vpn_accesses")).
 		WithArgs(access.ID, access.DeviceID, access.NodeID, access.Transport, access.ExternalReference,
 			access.CreatedAt, access.ExpiresAt, access.RevokedAt, access.Status).
 		WillReturnRows(accessRow(access))
+	mock.ExpectExec("INSERT INTO admin_audit_events").
+		WithArgs(auditID1, access.ID, access.NodeID, access.Transport, access.ExpiresAt).
+		WillReturnResult(sqlmock.NewResult(1, 1))
+	mock.ExpectCommit()
 	created, err := store.Create(context.Background(), access)
 	if err != nil {
 		t.Fatal(err)
@@ -48,9 +63,14 @@ func TestCreateAndIdempotentRevoke(t *testing.T) {
 	revoked := access
 	revoked.Status = pilotaccess.StatusRevoked
 	revoked.RevokedAt = &revokedAt
+	mock.ExpectBegin()
 	mock.ExpectQuery(regexp.QuoteMeta("UPDATE vpn_accesses")).
 		WithArgs(access.ID, revokedAt).
 		WillReturnRows(accessRow(revoked))
+	mock.ExpectExec("INSERT INTO admin_audit_events").
+		WithArgs(auditID2, access.ID).
+		WillReturnResult(sqlmock.NewResult(1, 1))
+	mock.ExpectCommit()
 	result, err := store.Revoke(context.Background(), access.ID, revokedAt)
 	if err != nil {
 		t.Fatal(err)
@@ -69,17 +89,22 @@ func TestCreateClassifiesConstraintErrors(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer database.Close()
-	store, err := New(database)
+	store, err := NewWithIDGenerator(database, func() (string, error) { return auditID1, nil })
 	if err != nil {
 		t.Fatal(err)
 	}
 	access := postgresTestAccess()
+	mock.ExpectBegin()
 	mock.ExpectQuery("INSERT INTO vpn_accesses").
 		WithArgs(access.ID, access.DeviceID, access.NodeID, access.Transport, access.ExternalReference,
 			access.CreatedAt, access.ExpiresAt, access.RevokedAt, access.Status).
 		WillReturnError(&pgconn.PgError{Code: "23505"})
+	mock.ExpectRollback()
 	if _, err := store.Create(context.Background(), access); !errors.Is(err, pilotaccess.ErrConflict) {
 		t.Fatalf("expected conflict, got %v", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
 	}
 }
 
@@ -89,13 +114,41 @@ func TestRevokeClassifiesMissingAccess(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer database.Close()
-	store, err := New(database)
+	store, err := NewWithIDGenerator(database, func() (string, error) { return auditID1, nil })
 	if err != nil {
 		t.Fatal(err)
 	}
+	mock.ExpectBegin()
 	mock.ExpectQuery("UPDATE vpn_accesses").WillReturnError(sql.ErrNoRows)
+	mock.ExpectRollback()
 	if _, err := store.Revoke(context.Background(), "018f5962-9d2a-4ea2-8f6d-9c2e8b6bff11", time.Now()); !errors.Is(err, pilotaccess.ErrNotFound) {
 		t.Fatalf("expected not found, got %v", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestCreateRollsBackWhenAuditWriteFails(t *testing.T) {
+	database, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+	store, err := NewWithIDGenerator(database, func() (string, error) { return auditID1, nil })
+	if err != nil {
+		t.Fatal(err)
+	}
+	access := postgresTestAccess()
+	mock.ExpectBegin()
+	mock.ExpectQuery("INSERT INTO vpn_accesses").WillReturnRows(accessRow(access))
+	mock.ExpectExec("INSERT INTO admin_audit_events").WillReturnError(errors.New("audit unavailable"))
+	mock.ExpectRollback()
+	if _, err := store.Create(context.Background(), access); err == nil {
+		t.Fatal("expected audit failure")
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
 	}
 }
 

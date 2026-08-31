@@ -103,4 +103,3 @@ The domain model remains stable across these stages:
   currently consume that manifest; pilot provisioning remains manual.
 - No production claim, automatic IP rotation, whitelist bypass claim, or automatic
   protocol mutation follows from this ADR.
-

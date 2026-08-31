@@ -3,6 +3,7 @@ package config
 import (
 	"errors"
 	"fmt"
+	"net"
 	"os"
 	"strconv"
 	"strings"
@@ -100,8 +101,26 @@ func Load() (Config, error) {
 	if result.PilotAdminToken != "" && (len(result.PilotAdminToken) < 32 || len(result.PilotAdminToken) > 512) {
 		return Config{}, errors.New("PILOT_ADMIN_TOKEN must contain between 32 and 512 bytes")
 	}
+	if strings.Contains(strings.ToLower(result.PilotAdminToken), "replace-with") {
+		return Config{}, errors.New("PILOT_ADMIN_TOKEN still contains the example placeholder")
+	}
 	result.PilotAccess = result.DatabaseURL != ""
+	if result.PilotAccess && !isPrivateListener(result.ListenAddress) {
+		return Config{}, errors.New("pilot admin API requires a literal loopback or private LISTEN_ADDRESS")
+	}
 	return result, nil
+}
+
+func isPrivateListener(address string) bool {
+	host, _, err := net.SplitHostPort(address)
+	if err != nil {
+		return false
+	}
+	if strings.EqualFold(host, "localhost") {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && !ip.IsUnspecified() && (ip.IsLoopback() || ip.IsPrivate())
 }
 
 func integerFromEnvironment(name string, fallback int) (int, error) {

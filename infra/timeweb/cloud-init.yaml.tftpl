@@ -77,7 +77,9 @@ runcmd:
   - [systemctl, reload, ssh]
   - [systemctl, enable, --now, docker]
   - [systemctl, enable, --now, systemd-timesyncd]
-  - [systemctl, enable, --now, nftables]
+  - [systemctl, enable, nftables]
+  - [sh, -c, "nft list table inet acvpn_host >/dev/null 2>&1 && nft delete table inet acvpn_host || true"]
+  - [nft, -f, /etc/nftables.conf]
   - [systemctl, enable, --now, fail2ban]
   - [systemctl, restart, prometheus-node-exporter]
 

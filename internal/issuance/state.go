@@ -120,6 +120,7 @@ func (store FileStore) Save(state State) error {
 		return fmt.Errorf("replace issuer state: %w", err)
 	}
 	if runtime.GOOS != "windows" {
+		// #nosec G304 -- the directory is derived from trusted MANIFEST_STATE_PATH configuration.
 		directoryHandle, err := os.Open(directory)
 		if err != nil {
 			return fmt.Errorf("open issuer state directory: %w", err)

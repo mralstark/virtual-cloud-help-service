@@ -34,7 +34,21 @@ func (store *Store) CheckSchema(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("pilot telemetry postgres: check schema: %w", err)
 	}
-	return rows.Close()
+	if err := rows.Close(); err != nil {
+		return fmt.Errorf("pilot telemetry postgres: close schema check: %w", err)
+	}
+	joinRows, err := store.db.QueryContext(ctx, `
+		SELECT device.account_id
+		FROM vpn_accesses AS access
+		JOIN devices AS device ON device.id = access.device_id
+		WHERE false`)
+	if err != nil {
+		return fmt.Errorf("pilot telemetry postgres: check report schema: %w", err)
+	}
+	if err := joinRows.Close(); err != nil {
+		return fmt.Errorf("pilot telemetry postgres: close report schema check: %w", err)
+	}
+	return nil
 }
 
 func (store *Store) Create(ctx context.Context, result pilottelemetry.TestResult) (pilottelemetry.TestResult, error) {
@@ -128,6 +142,7 @@ func (store *Store) Aggregate(ctx context.Context, at time.Time) (aggregate pilo
 		FROM pilot_test_results
 		WHERE success = false AND isp IS NOT NULL
 		GROUP BY isp
+		HAVING count(*) >= 2
 		ORDER BY count(*) DESC, isp
 		LIMIT 100`)
 	if err != nil {
