@@ -7,5 +7,5 @@ output "server_ipv4" {
 }
 
 output "deployment_warning" {
-  value = "This single-provider pilot does not bypass a strict allowlist unless its destination is explicitly approved."
+  value = "Official Amnezia installation, post-install inventory, backup, and acceptance tests remain manual gates."
 }

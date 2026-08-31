@@ -1,10 +1,26 @@
 #cloud-config
 package_update: true
-package_upgrade: true
+package_upgrade: false
+ssh_pwauth: false
 packages:
+  - ca-certificates
+  - curl
+  - docker.io
   - nftables
   - fail2ban
+  - prometheus-node-exporter
   - unattended-upgrades
+
+users:
+  - default
+  - name: acvpn
+    gecos: ACVPN pilot operator
+    groups: [sudo]
+    shell: /bin/bash
+    lock_passwd: true
+    sudo: ALL=(ALL) NOPASSWD:ALL
+    ssh_authorized_keys:
+      - ${ssh_public_key}
 
 write_files:
   - path: /etc/ssh/sshd_config.d/60-acvpn-hardening.conf
@@ -16,13 +32,13 @@ write_files:
       PermitRootLogin prohibit-password
       AllowTcpForwarding no
       X11Forwarding no
+      PermitTunnel no
       MaxAuthTries 3
-  - path: /etc/nftables.conf
+  - path: /etc/nftables.d/acvpn-host.nft
     owner: root:root
     permissions: "0600"
     content: |
-      flush ruleset
-      table inet filter {
+      table inet acvpn_host {
         chain input {
           type filter hook input priority filter; policy drop;
           ct state invalid drop
@@ -31,16 +47,15 @@ write_files:
           ip protocol icmp limit rate 10/second accept
           ip6 nexthdr ipv6-icmp limit rate 10/second accept
           ip saddr ${admin_cidr} tcp dport 22 ct state new limit rate 6/minute accept
-          udp dport 51820 accept
-          tcp dport { 80, 443 } accept
-        }
-        chain forward {
-          type filter hook forward priority filter; policy drop;
-        }
-        chain output {
-          type filter hook output priority filter; policy accept;
+          udp dport ${awg_port} accept
+          tcp dport ${reality_port} accept
         }
       }
+  - path: /etc/nftables.conf
+    owner: root:root
+    permissions: "0600"
+    content: |
+      include "/etc/nftables.d/*.nft"
   - path: /etc/fail2ban/jail.d/sshd.local
     owner: root:root
     permissions: "0644"
@@ -50,10 +65,20 @@ write_files:
       maxretry = 3
       findtime = 10m
       bantime = 1h
+  - path: /etc/default/prometheus-node-exporter
+    owner: root:root
+    permissions: "0644"
+    content: |
+      ARGS="--web.listen-address=127.0.0.1:9100"
 
 runcmd:
+  - [usermod, -aG, docker, acvpn]
+  - [sshd, -t]
+  - [systemctl, reload, ssh]
+  - [systemctl, enable, --now, docker]
+  - [systemctl, enable, --now, systemd-timesyncd]
   - [systemctl, enable, --now, nftables]
-  - [systemctl, restart, ssh]
   - [systemctl, enable, --now, fail2ban]
+  - [systemctl, restart, prometheus-node-exporter]
 
-final_message: "Base host hardening complete; data-plane installation intentionally requires a separately reviewed release manifest."
+final_message: "Disposable host bootstrap complete; official Amnezia installation and post-install inventory remain manual gates."

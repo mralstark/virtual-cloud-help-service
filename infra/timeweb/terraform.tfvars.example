@@ -1,5 +1,7 @@
 ssh_public_key_path = "C:/Users/example/.ssh/acvpn_timeweb_pilot.pub"
 admin_cidr          = "198.51.100.25/32"
 timeweb_project_id  = 123456
+awg_port            = 585
+reality_port        = 443
 
 # Cost guard defaults: 2 vCPU, 2 GiB RAM, 20 GiB disk.
