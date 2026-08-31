@@ -41,6 +41,8 @@ green unit-test run as authorization to launch for users.
   implemented.
 - [ ] Produce SBOM and signed release provenance, scan deployed upstream binaries,
   and validate canary rollback.
+- [ ] Mirror reviewed data-plane artifacts under operator control and sign the
+  release metadata; the pilot lock currently relies on GitHub for initial staging.
 - [ ] Complete an independent code/cryptography review and resolve every high or
   medium finding.
 - [ ] Complete provider-terms, privacy, data-retention, abuse, and applicable legal

@@ -20,6 +20,7 @@ key cannot sign a later version and a policy rollback is rejected.
   equivocation checks;
 - sequential discovery fallback with pinned signing keys and bounded downloads;
 - a transport-aware endpoint planner with cooldown and provider/ASN diversity;
+- a fail-closed downloader for size-bounded, SHA-256-pinned pilot artifacts;
 - liveness, readiness, and manifest HTTP endpoints;
 - cached issuance plus bounded concurrent HTTP work;
 - no request/access logging in the application;
@@ -78,8 +79,12 @@ go test ./...
 go test -race ./...
 go vet ./...
 go run golang.org/x/vuln/cmd/govulncheck@v1.1.4 ./...
-go build -trimpath ./cmd/control-plane ./cmd/manifest-keygen ./cmd/manifest-key-policy
+go build -trimpath ./cmd/artifact-fetch ./cmd/control-plane ./cmd/manifest-keygen ./cmd/manifest-key-policy
 ```
+
+Data-plane versions in `deploy/data-plane/artifacts.lock.json` are laboratory
+candidates only. `cmd/artifact-fetch` verifies exact bytes but never executes or
+installs them. See [ADR 0004](docs/adr/0004-pinned-pilot-data-plane.md).
 
 ## Configuration
 
