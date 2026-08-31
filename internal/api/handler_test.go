@@ -94,3 +94,22 @@ func TestExpensiveEndpointsHaveBoundedConcurrency(t *testing.T) {
 	close(release)
 	<-firstDone
 }
+
+func TestPilotAdminHandlerIsMountedOnlyWhenConfigured(t *testing.T) {
+	admin := http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
+		writer.WriteHeader(http.StatusNoContent)
+	})
+	configured := NewWithPilotAdmin(func() (manifest.Envelope, error) { return manifest.Envelope{}, nil }, nil, 1, admin)
+	response := httptest.NewRecorder()
+	configured.ServeHTTP(response, httptest.NewRequest(http.MethodPost, "/admin/pilot/access", nil))
+	if response.Code != http.StatusNoContent {
+		t.Fatalf("configured admin status = %d", response.Code)
+	}
+
+	disabled := New(func() (manifest.Envelope, error) { return manifest.Envelope{}, nil }, nil, 1)
+	disabledResponse := httptest.NewRecorder()
+	disabled.ServeHTTP(disabledResponse, httptest.NewRequest(http.MethodPost, "/admin/pilot/access", nil))
+	if disabledResponse.Code != http.StatusNotFound {
+		t.Fatalf("disabled admin status = %d", disabledResponse.Code)
+	}
+}

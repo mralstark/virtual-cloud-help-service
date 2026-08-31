@@ -100,6 +100,20 @@ installs them. See [ADR 0004](docs/adr/0004-pinned-pilot-data-plane.md).
 | `MANIFEST_CACHE_TTL` | `30s` | Cached envelope and catalog reload interval |
 | `MAX_IN_FLIGHT` | `64` | Concurrent readiness/manifest request limit |
 | `SHUTDOWN_TIMEOUT` | `10s` | Graceful shutdown deadline |
+| `DATABASE_URL` | disabled | PostgreSQL connection for pilot access metadata |
+| `PILOT_ADMIN_TOKEN` | disabled | 32–512 byte bearer token for the loopback/private pilot admin API |
+
+`DATABASE_URL` and `PILOT_ADMIN_TOKEN` must be set together. Apply
+`migrations/000001_initial.sql` and `migrations/000002_pilot_vpn_access.sql` before
+enabling them. The service then verifies the schema at startup and exposes:
+
+- `POST /admin/pilot/access` to record metadata for access created manually in
+  official AmneziaVPN;
+- `POST /admin/pilot/access/{id}/revoke` to mark that record revoked.
+
+Keep these routes on loopback or an authenticated private edge. The API accepts an
+opaque external reference, not a connection profile or private client key. Use
+`.env.example` only as a variable-name template; never commit real values.
 
 The service should normally listen on a private interface behind a hardened HTTPS
 reverse proxy. The private signing key must be mounted read-only as a secret and

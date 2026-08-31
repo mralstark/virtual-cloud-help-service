@@ -2,7 +2,9 @@ package main
 
 import (
 	"context"
+	"database/sql"
 	"errors"
+	"fmt"
 	"log"
 	"net/http"
 	"os"
@@ -10,9 +12,14 @@ import (
 	"syscall"
 	"time"
 
+	_ "github.com/jackc/pgx/v5/stdlib"
+
 	"github.com/mralstark/virtual-cloud-help-service/internal/api"
 	"github.com/mralstark/virtual-cloud-help-service/internal/config"
 	"github.com/mralstark/virtual-cloud-help-service/internal/manifest"
+	"github.com/mralstark/virtual-cloud-help-service/internal/pilotaccess"
+	pilotpostgres "github.com/mralstark/virtual-cloud-help-service/internal/pilotaccess/postgres"
+	"github.com/mralstark/virtual-cloud-help-service/internal/pilotapi"
 	"github.com/mralstark/virtual-cloud-help-service/internal/service"
 	"github.com/mralstark/virtual-cloud-help-service/internal/signingkey"
 )
@@ -67,9 +74,38 @@ func run(logger *log.Logger) error {
 		return err
 	}
 
+	httpHandler := api.New(issuer.Issue, logger, cfg.MaxInFlight)
+	var database *sql.DB
+	if cfg.PilotAccess {
+		database, err = openPilotDatabase(cfg.DatabaseURL)
+		if err != nil {
+			return err
+		}
+		defer database.Close()
+		store, err := pilotpostgres.New(database)
+		if err != nil {
+			return err
+		}
+		checkContext, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		err = store.CheckSchema(checkContext)
+		cancel()
+		if err != nil {
+			return err
+		}
+		accessService, err := pilotaccess.NewService(store, time.Now, nil)
+		if err != nil {
+			return err
+		}
+		adminHandler, err := pilotapi.New(accessService, cfg.PilotAdminToken, logger)
+		if err != nil {
+			return err
+		}
+		httpHandler = api.NewWithPilotAdmin(issuer.Issue, logger, cfg.MaxInFlight, adminHandler)
+	}
+
 	server := &http.Server{
 		Addr:              cfg.ListenAddress,
-		Handler:           api.New(issuer.Issue, logger, cfg.MaxInFlight),
+		Handler:           httpHandler,
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       10 * time.Second,
 		WriteTimeout:      10 * time.Second,
@@ -103,4 +139,22 @@ func run(logger *log.Logger) error {
 		}
 		return nil
 	}
+}
+
+func openPilotDatabase(databaseURL string) (*sql.DB, error) {
+	database, err := sql.Open("pgx", databaseURL)
+	if err != nil {
+		return nil, fmt.Errorf("open pilot database: %w", err)
+	}
+	database.SetMaxOpenConns(5)
+	database.SetMaxIdleConns(2)
+	database.SetConnMaxIdleTime(5 * time.Minute)
+	database.SetConnMaxLifetime(30 * time.Minute)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := database.PingContext(ctx); err != nil {
+		_ = database.Close()
+		return nil, fmt.Errorf("connect pilot database: %w", err)
+	}
+	return database, nil
 }

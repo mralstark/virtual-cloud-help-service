@@ -17,6 +17,10 @@ type Handler struct {
 }
 
 func New(issue IssueFunc, logger *log.Logger, maxInFlight int) http.Handler {
+	return NewWithPilotAdmin(issue, logger, maxInFlight, nil)
+}
+
+func NewWithPilotAdmin(issue IssueFunc, logger *log.Logger, maxInFlight int, pilotAdmin http.Handler) http.Handler {
 	if maxInFlight < 1 {
 		maxInFlight = 1
 	}
@@ -25,6 +29,9 @@ func New(issue IssueFunc, logger *log.Logger, maxInFlight int) http.Handler {
 	mux.HandleFunc("/healthz", handler.health)
 	mux.HandleFunc("/readyz", handler.ready)
 	mux.HandleFunc("/v1/manifest", handler.manifest)
+	if pilotAdmin != nil {
+		mux.Handle("/admin/pilot/", pilotAdmin)
+	}
 	return securityHeaders(mux)
 }
 
