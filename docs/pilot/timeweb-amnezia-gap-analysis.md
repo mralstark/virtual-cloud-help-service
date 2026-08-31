@@ -4,6 +4,17 @@
 - Inputs: repository audit at `2daf7a3` and read-only Timeweb server listing
 - Target: one existing Timeweb VPS, official AmneziaVPN, at most 10 pilot users
 
+## Branch implementation progress
+
+The current branch now implements EPIC 1–2 and the repository-only portions of
+EPIC 4–12/14: the architecture/network ADRs, read-only node abstractions, fail-closed
+provider operations, access and test-result persistence/services, authenticated
+pilot admin workflow, privacy-safe reporting, Prometheus formatting, and
+diagnostic/recovery/acceptance documentation. The future-host Terraform moved to
+`infra/timeweb` and validates without applying. Items below describe the original
+audit gap; server-dependent evidence remains unresolved because Timeweb still
+reported zero servers at the last authenticated inventory.
+
 ## Existing
 
 - A small Go control plane with bounded HTTP handling, liveness, manifest
@@ -137,4 +148,3 @@ The immediate next implementation after this documentation is not a VPN installe
 It is either the missing read-only VPS inventory, or—if no VPS exists yet—the
 provider-independent domain interface and architecture ADR developed against a
 sanitized fixture while provisioning remains paused.
-

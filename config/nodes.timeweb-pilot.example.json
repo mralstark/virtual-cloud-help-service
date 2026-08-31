@@ -18,7 +18,7 @@
         {
           "id": "timeweb-fra-pilot-1-awg",
           "transport": "amneziawg",
-          "address": "vpn.pilot.example.invalid:51820",
+          "address": "vpn.pilot.example.invalid:585",
           "credential_ref": "device-timeweb-pilot-awg",
           "priority": 10
         },
