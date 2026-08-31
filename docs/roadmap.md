@@ -21,7 +21,8 @@ required to build or test the repository.
   strict-allowlist boundary in ADR 0003.
 - [x] Add a Terraform/cloud-init infrastructure skeleton with SSH-only access,
   host firewall, automatic security updates, and explicit pilot cost guards.
-- [ ] Pin data-plane artifacts by version and checksum.
+- [x] Pin laboratory data-plane inputs by version, immutable commit, checksum, and
+  maximum size; production build outputs, SBOM, and provenance remain blockers.
 - [ ] Provision a hardened disposable host from Terraform and Ansible.
 - [ ] Deploy one AmneziaWG path and one REALITY path.
 - [ ] Add DNS, IPv4/IPv6, MTU, suspend/resume, and kill-switch tests.
