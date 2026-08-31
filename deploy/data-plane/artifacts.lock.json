@@ -1,0 +1,39 @@
+{
+  "schema_version": 1,
+  "evidence_cutoff": "2026-08-31",
+  "artifacts": [
+    {
+      "name": "amneziawg-go-source",
+      "file_name": "amneziawg-go-v0.2.16.tar.gz",
+      "version": "v0.2.16",
+      "commit": "730d6c39d0c4e348a3d080bebe496664215e5c99",
+      "kind": "source",
+      "url": "https://codeload.github.com/amnezia-vpn/amneziawg-go/tar.gz/refs/tags/v0.2.16",
+      "sha256": "8327a22c7bcf4f6b05585d4b9536759c1e11fcc1e6830e5186fd55a14255eae1",
+      "max_bytes": 1048576,
+      "purpose": "Pinned userspace AmneziaWG 2.x candidate for the UDP pilot path"
+    },
+    {
+      "name": "amneziawg-tools-source",
+      "file_name": "amneziawg-tools-v1.0.20260618-2.tar.gz",
+      "version": "v1.0.20260618-2",
+      "commit": "61e741780e8465a67a7d7fb6cffe14a8a15d624a",
+      "kind": "source",
+      "url": "https://codeload.github.com/amnezia-vpn/amneziawg-tools/tar.gz/refs/tags/v1.0.20260618-2",
+      "sha256": "cbda09c90d0740b6c3d39622da9f96cfdc2b83459d45973aadd7bf77518fdf10",
+      "max_bytes": 1048576,
+      "purpose": "Pinned AmneziaWG 2.x configuration tools candidate"
+    },
+    {
+      "name": "xray-linux-amd64",
+      "file_name": "Xray-linux-64-v26.3.27.zip",
+      "version": "v26.3.27",
+      "commit": "d2758a023cd7f4174a5a5fa4ff66e487d4342ba0",
+      "kind": "binary",
+      "url": "https://github.com/XTLS/Xray-core/releases/download/v26.3.27/Xray-linux-64.zip",
+      "sha256": "23cd9af937744d97776ee35ecad4972cf4b2109d1e0fe6be9930467608f7c8ae",
+      "max_bytes": 33554432,
+      "purpose": "Stable Xray-core candidate for the independent TCP/443 pilot path"
+    }
+  ]
+}
