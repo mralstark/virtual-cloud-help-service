@@ -76,6 +76,10 @@ func TestCooldownIsExponentialAndCapped(t *testing.T) {
 	if _, err := Cooldown(FailureClass("invalid"), 1); err == nil {
 		t.Fatal("Cooldown() accepted an unknown failure class")
 	}
+	delay, err = Cooldown(FailureAllowlist, 100)
+	if err != nil || delay != 6*time.Hour {
+		t.Fatalf("allowlist cooldown = %s, %v", delay, err)
+	}
 }
 
 func selectorDocument(t *testing.T, now time.Time) manifest.Document {

@@ -17,7 +17,10 @@ required to build or test the repository.
 
 ## Milestone 1 — disposable laboratory node
 
-- [ ] Choose the first VPS providers and record the decision.
+- [x] Choose Timeweb Cloud Frankfurt for the single-provider pilot and record the
+  strict-allowlist boundary in ADR 0003.
+- [x] Add a Terraform/cloud-init infrastructure skeleton with SSH-only access,
+  host firewall, automatic security updates, and explicit pilot cost guards.
 - [ ] Pin data-plane artifacts by version and checksum.
 - [ ] Provision a hardened disposable host from Terraform and Ansible.
 - [ ] Deploy one AmneziaWG path and one REALITY path.

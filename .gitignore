@@ -8,6 +8,8 @@ coverage.out
 *.log
 *.tfstate
 *.tfstate.*
+*.tfvars
+*.tfplan
 .terraform/
 crash.log
 override.tf

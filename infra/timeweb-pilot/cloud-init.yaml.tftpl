@@ -1,0 +1,59 @@
+#cloud-config
+package_update: true
+package_upgrade: true
+packages:
+  - nftables
+  - fail2ban
+  - unattended-upgrades
+
+write_files:
+  - path: /etc/ssh/sshd_config.d/60-acvpn-hardening.conf
+    owner: root:root
+    permissions: "0644"
+    content: |
+      PasswordAuthentication no
+      KbdInteractiveAuthentication no
+      PermitRootLogin prohibit-password
+      AllowTcpForwarding no
+      X11Forwarding no
+      MaxAuthTries 3
+  - path: /etc/nftables.conf
+    owner: root:root
+    permissions: "0600"
+    content: |
+      flush ruleset
+      table inet filter {
+        chain input {
+          type filter hook input priority filter; policy drop;
+          ct state invalid drop
+          ct state established,related accept
+          iifname "lo" accept
+          ip protocol icmp limit rate 10/second accept
+          ip6 nexthdr ipv6-icmp limit rate 10/second accept
+          ip saddr ${admin_cidr} tcp dport 22 ct state new limit rate 6/minute accept
+          udp dport 51820 accept
+          tcp dport { 80, 443 } accept
+        }
+        chain forward {
+          type filter hook forward priority filter; policy drop;
+        }
+        chain output {
+          type filter hook output priority filter; policy accept;
+        }
+      }
+  - path: /etc/fail2ban/jail.d/sshd.local
+    owner: root:root
+    permissions: "0644"
+    content: |
+      [sshd]
+      enabled = true
+      maxretry = 3
+      findtime = 10m
+      bantime = 1h
+
+runcmd:
+  - [systemctl, enable, --now, nftables]
+  - [systemctl, restart, ssh]
+  - [systemctl, enable, --now, fail2ban]
+
+final_message: "Base host hardening complete; data-plane installation intentionally requires a separately reviewed release manifest."
