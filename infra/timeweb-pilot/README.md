@@ -12,10 +12,15 @@ always requires the account owner's explicit approval.
   server and network management are sufficient for this stack.
 - Never put a token, private key, real IP, or domain secret in this directory.
 - Review the generated plan and current Timeweb price before applying it.
+- Confirm `fra-1` has immediately available capacity. Do not apply while the panel
+  offers only a preorder unless the owner explicitly accepts an unbounded wait.
 - The cloud-init file installs only host hardening. It deliberately does not fetch
   unpinned VPN binaries from the Internet.
 - The attached Timeweb firewall does not replace nftables. Confirm its default DROP
   policy and rules in the panel before exposing the host.
+- Timeweb's managed cloud-server DDoS option is not available in Frankfurt. The
+  pilot must not set `is_ddos_guard`; use the cloud firewall and host controls and
+  record this limitation in the demonstration report.
 
 ## Validate without creating resources
 
@@ -29,7 +34,7 @@ terraform validate
 terraform plan
 ```
 
-Do not run `terraform apply` until the plan, monthly price, location, DDoS option,
+Do not run `terraform apply` until the plan, monthly price, location, DDoS limitation,
 firewall behavior, and deletion policy have been reviewed. A strict destination
 allowlist still requires the customer or network operator to approve the resulting
 IP/domain.

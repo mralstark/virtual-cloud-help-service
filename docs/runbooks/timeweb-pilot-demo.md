@@ -24,9 +24,11 @@ or the repository.
 
 ## Pre-deployment gate
 
-1. Review the current Timeweb price for the exact `fra-1` configuration and DDoS
-   option. Terraform's resource guard permits at most 2 vCPU, 4 GiB RAM, and 40 GiB
-   disk unless code review explicitly changes it.
+1. Review the current Timeweb price for the exact `fra-1` configuration and confirm
+   the zone has immediately available capacity rather than a preorder queue.
+   Timeweb's managed cloud-server DDoS option is not available in Frankfurt and
+   must remain disabled. Terraform's resource guard permits at most 2 vCPU, 4 GiB
+   RAM, and 40 GiB disk unless code review explicitly changes it.
 2. Run `terraform init`, `terraform fmt -check`, `terraform validate`, and
    `terraform plan`. Save no plan file containing sensitive provider values.
 3. Confirm the plan reuses the reviewed project and creates one SSH public key, one
