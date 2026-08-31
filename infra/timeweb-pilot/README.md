@@ -7,7 +7,9 @@ always requires the account owner's explicit approval.
 ## Security boundaries
 
 - Use a dedicated Ed25519 SSH key and a single trusted IPv4 `/32` admin CIDR.
-- Supply the least-privilege, short-lived API token only as `TWC_TOKEN`.
+- Reuse a dedicated existing Timeweb project and scope the API token to that project.
+- Supply the least-privilege, short-lived API token only as `TWC_TOKEN`; cloud
+  server and network management are sufficient for this stack.
 - Never put a token, private key, real IP, or domain secret in this directory.
 - Review the generated plan and current Timeweb price before applying it.
 - The cloud-init file installs only host hardening. It deliberately does not fetch
@@ -19,7 +21,7 @@ always requires the account owner's explicit approval.
 
 ```powershell
 Copy-Item terraform.tfvars.example terraform.tfvars
-# Replace the example path and CIDR with local values.
+# Replace the example path, CIDR, and existing Timeweb project ID with local values.
 $env:TWC_TOKEN = '<short-lived-token>'
 terraform init
 terraform fmt -check
