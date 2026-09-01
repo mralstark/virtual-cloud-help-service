@@ -18,11 +18,43 @@ variable "server_name" {
   description = "Pilot server name and hostname."
   type        = string
   default     = "acvpn-fra-pilot-1"
+
+  validation {
+    condition     = can(regex("^[a-z0-9][a-z0-9-]{0,62}$", var.server_name))
+    error_message = "server_name must be a canonical DNS label."
+  }
 }
 
 variable "ssh_public_key_path" {
   description = "Absolute path to a dedicated Ed25519 public key."
   type        = string
+
+  validation {
+    condition     = trimspace(var.ssh_public_key_path) != ""
+    error_message = "ssh_public_key_path must not be empty."
+  }
+}
+
+variable "awg_port" {
+  description = "UDP port selected in official AmneziaVPN after listener inventory."
+  type        = number
+  default     = 585
+
+  validation {
+    condition     = floor(var.awg_port) == var.awg_port && var.awg_port >= 1 && var.awg_port <= 65535 && var.awg_port != 22
+    error_message = "awg_port must be a valid non-SSH UDP port."
+  }
+}
+
+variable "reality_port" {
+  description = "TCP port selected for XRay Reality after listener inventory."
+  type        = number
+  default     = 443
+
+  validation {
+    condition     = floor(var.reality_port) == var.reality_port && var.reality_port >= 1 && var.reality_port <= 65535 && var.reality_port != 22
+    error_message = "reality_port must be a valid non-SSH TCP port."
+  }
 }
 
 variable "admin_cidr" {

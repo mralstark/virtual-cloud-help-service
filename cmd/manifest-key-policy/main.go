@@ -67,6 +67,7 @@ func main() {
 }
 
 func loadGrantInputs(path string) ([]grantInput, error) {
+	// #nosec G304 -- the grants path is a trusted offline-operator CLI argument.
 	file, err := os.Open(path)
 	if err != nil {
 		return nil, fmt.Errorf("open grants: %w", err)
@@ -107,6 +108,7 @@ func ensureEOF(decoder *json.Decoder) error {
 }
 
 func writePolicy(path string, policy manifest.KeyPolicy) error {
+	// #nosec G302,G304 -- this is a public signed policy at a trusted exclusive CLI path.
 	file, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
 	if err != nil {
 		return fmt.Errorf("create key policy: %w", err)

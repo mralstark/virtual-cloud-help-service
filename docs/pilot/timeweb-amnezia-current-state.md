@@ -5,6 +5,13 @@
 - Scope: read-only repository and Timeweb account inventory for EPIC 0
 - Pilot target: one existing Timeweb VPS, at most 10 users, official AmneziaVPN
 
+This document preserves the evidence at the audited revision. The current branch
+has since added the provider-neutral node model, Timeweb read-only adapter and
+fail-closed lifecycle seam, pilot access/test-result migrations and admin workflow,
+privacy-safe reports/metrics, recovery/diagnostic runbooks, and a safer future-host
+stack at `infra/timeweb`. None of those changes is evidence that a VPS or Amnezia
+installation exists.
+
 ## Evidence boundary
 
 The repository audit is complete for the files present at the audited revision.
@@ -104,20 +111,20 @@ mount, port, network, restart policy, or health state yet.
 
 ## Provisioning code
 
-`infra/timeweb-pilot` is a future/disposable-host Terraform stack. Its current plan
-creates one SSH public key, one new Frankfurt server, and one attached Timeweb
-firewall in an existing project. Cloud-init performs package upgrades, writes SSH
-hardening and nftables configuration, installs fail2ban, and opens TCP/80, TCP/443,
-and UDP/51820 at the host layer.
+At the audited revision, `infra/timeweb-pilot` was a future/disposable-host
+Terraform stack. It has since moved to `infra/timeweb` and now avoids package
+upgrades and ruleset flushes, installs the baseline Docker/monitoring packages, and
+defines explicit reviewed firewall rules. It still creates rather than inventories
+a server and must not be applied to an existing VPS.
 
 It must not be applied to satisfy the new existing-VPS pilot requirement:
 
 - it creates rather than inventories a server;
 - Frankfurt capacity was preorder-only at audit time;
-- its UDP port differs from the preferred pilot UDP/585 layout;
-- it replaces `/etc/nftables.conf` and runs package upgrades on first boot;
-- it does not install Docker or the monitoring agent;
-- its cloud firewall policy/rules are not explicit in the Terraform resource.
+- any port still requires observed listener evidence before use;
+- a plan creates billable resources and is not an import plan;
+- official Amnezia installation and post-install inventory remain manual gates;
+- `prevent_destroy` must remain unless a separately reviewed teardown is approved.
 
 The stack remains useful as preparation for a later disposable VM, but it is not an
 import or management plan for an existing server.
@@ -192,4 +199,3 @@ requires AmneziaWG 3.1 through official Amnezia, while ADR 0004 deliberately pin
 cutoff. The repository must not implement or install either line itself for this
 pilot. The official installer result and exact deployed versions must be inventoried
 after a disposable/existing host is available, then acceptance-tested before use.
-

@@ -100,6 +100,35 @@ installs them. See [ADR 0004](docs/adr/0004-pinned-pilot-data-plane.md).
 | `MANIFEST_CACHE_TTL` | `30s` | Cached envelope and catalog reload interval |
 | `MAX_IN_FLIGHT` | `64` | Concurrent readiness/manifest request limit |
 | `SHUTDOWN_TIMEOUT` | `10s` | Graceful shutdown deadline |
+| `DATABASE_URL` | disabled | PostgreSQL connection for pilot access metadata |
+| `PILOT_ADMIN_TOKEN` | disabled | 32–512 byte bearer token for the loopback/private pilot admin API |
+
+`DATABASE_URL` and `PILOT_ADMIN_TOKEN` must be set together. Apply
+all migrations in numeric order through `migrations/000003_pilot_test_results.sql`
+before enabling them. The service then verifies the schema at startup and exposes:
+
+- `POST /admin/pilot/access` to record metadata for access created manually in
+  official AmneziaVPN;
+- `POST /admin/pilot/access/{id}/revoke` to mark that record revoked.
+- `POST /admin/pilot/test-results` to record a coarse, privacy-safe acceptance result;
+- `GET /admin/pilot/report` to export transport success rates, failure stages,
+  optional ISP failure counts, active users/devices, and optional current server
+  metrics.
+
+Keep these routes on loopback or an authenticated private edge. The API accepts an
+opaque external reference, not a connection profile or private client key. Use
+`.env.example` only as a variable-name template; never commit real values.
+Test results intentionally have no fields for URLs, destination domains, DNS
+history, traffic contents, or client public IP addresses.
+When pilot access is enabled, startup rejects wildcard, hostname, and public-IP
+`LISTEN_ADDRESS` values. Remote PostgreSQL endpoints must use TLS with no plaintext
+fallback; loopback and Unix-socket database connections may be plaintext.
+Access registration/revocation and their `admin_audit_events` rows commit in one
+transaction, so an unavailable audit sink fails the mutation closed.
+Generate the admin token with a cryptographic RNG (for example,
+`openssl rand -base64 32`). For a remote database use `sslmode=verify-full` and an
+approved CA; `sslmode=require` is rejected because it encrypts without proving the
+server identity.
 
 The service should normally listen on a private interface behind a hardened HTTPS
 reverse proxy. The private signing key must be mounted read-only as a secret and

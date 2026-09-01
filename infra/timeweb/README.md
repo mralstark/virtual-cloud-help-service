@@ -1,6 +1,7 @@
-# Timeweb Cloud Frankfurt pilot
+# Future Timeweb Cloud Frankfurt pilot host
 
-This directory describes a **billable**, disposable Timeweb Cloud server. Running
+This directory describes a **billable**, disposable future Timeweb Cloud server.
+It does not manage or import an existing pilot VPS. Running
 `terraform plan` is read-only; running `terraform apply` creates paid resources and
 always requires the account owner's explicit approval.
 
@@ -14,10 +15,14 @@ always requires the account owner's explicit approval.
 - Review the generated plan and current Timeweb price before applying it.
 - Confirm `fra-1` has immediately available capacity. Do not apply while the panel
   offers only a preorder unless the owner explicitly accepts an unbounded wait.
-- The cloud-init file installs only host hardening. It deliberately does not fetch
-  unpinned VPN binaries from the Internet.
-- The attached Timeweb firewall does not replace nftables. Confirm its default DROP
-  policy and rules in the panel before exposing the host.
+- Cloud-init creates a key-only `acvpn` operator, installs Docker and a loopback-only
+  node exporter, enables time sync, and adds a dedicated host-input nftables table.
+  It never flushes the existing ruleset and does not implement VPN protocols.
+- The attached Timeweb firewall has explicit SSH, AWG, Reality, ICMP, and outbound
+  rules. A Terraform postcondition rejects a non-DROP default policy, but the
+  rendered plan and panel still require human review.
+- `prevent_destroy` deliberately blocks accidental Terraform deletion. Removing it
+  is a separate reviewed change.
 - Timeweb's managed cloud-server DDoS option is not available in Frankfurt. The
   pilot must not set `is_ddos_guard`; use the cloud firewall and host controls and
   record this limitation in the demonstration report.
@@ -34,10 +39,10 @@ terraform validate
 terraform plan
 ```
 
-Do not run `terraform apply` until the plan, monthly price, location, DDoS limitation,
-firewall behavior, and deletion policy have been reviewed. A strict destination
-allowlist still requires the customer or network operator to approve the resulting
-IP/domain.
+Do not run `terraform apply` until the plan, monthly price, location, capacity,
+firewall behavior, backup cost, and deletion policy have been reviewed. The
+official AmneziaVPN client owns initial self-hosted installation; the configured
+ports must be rechecked against post-install listeners before testers connect.
 
 Continue with the reviewed steps in
 [`docs/runbooks/timeweb-pilot-demo.md`](../../docs/runbooks/timeweb-pilot-demo.md).

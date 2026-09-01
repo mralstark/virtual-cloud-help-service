@@ -2,17 +2,30 @@ package main
 
 import (
 	"context"
+	"crypto/tls"
+	"database/sql"
 	"errors"
+	"fmt"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
+
+	"github.com/jackc/pgx/v5"
+	_ "github.com/jackc/pgx/v5/stdlib"
 
 	"github.com/mralstark/virtual-cloud-help-service/internal/api"
 	"github.com/mralstark/virtual-cloud-help-service/internal/config"
 	"github.com/mralstark/virtual-cloud-help-service/internal/manifest"
+	"github.com/mralstark/virtual-cloud-help-service/internal/pilotaccess"
+	pilotpostgres "github.com/mralstark/virtual-cloud-help-service/internal/pilotaccess/postgres"
+	"github.com/mralstark/virtual-cloud-help-service/internal/pilotapi"
+	"github.com/mralstark/virtual-cloud-help-service/internal/pilottelemetry"
+	telemetrypostgres "github.com/mralstark/virtual-cloud-help-service/internal/pilottelemetry/postgres"
 	"github.com/mralstark/virtual-cloud-help-service/internal/service"
 	"github.com/mralstark/virtual-cloud-help-service/internal/signingkey"
 )
@@ -67,9 +80,59 @@ func run(logger *log.Logger) error {
 		return err
 	}
 
+	httpHandler := api.New(issuer.Issue, logger, cfg.MaxInFlight)
+	var database *sql.DB
+	if cfg.PilotAccess {
+		database, err = openPilotDatabase(cfg.DatabaseURL)
+		if err != nil {
+			return err
+		}
+		defer database.Close()
+		store, err := pilotpostgres.New(database)
+		if err != nil {
+			return err
+		}
+		telemetryStore, err := telemetrypostgres.New(database)
+		if err != nil {
+			return err
+		}
+		checkContext, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		err = store.CheckSchema(checkContext)
+		if err != nil {
+			cancel()
+			return err
+		}
+		err = telemetryStore.CheckSchema(checkContext)
+		cancel()
+		if err != nil {
+			return err
+		}
+		accessService, err := pilotaccess.NewService(store, time.Now, nil)
+		if err != nil {
+			return err
+		}
+		telemetryService, err := pilottelemetry.NewService(telemetryStore, time.Now, nil, nil)
+		if err != nil {
+			return err
+		}
+		adminHandler, err := pilotapi.NewWithTelemetry(accessService, telemetryService, cfg.PilotAdminToken, logger)
+		if err != nil {
+			return err
+		}
+		databaseReady := func(ctx context.Context) error {
+			pingContext, cancel := context.WithTimeout(ctx, 2*time.Second)
+			defer cancel()
+			if err := database.PingContext(pingContext); err != nil {
+				return errors.New("pilot database unavailable")
+			}
+			return nil
+		}
+		httpHandler = api.NewWithPilotAdminAndReadiness(issuer.Issue, logger, cfg.MaxInFlight, adminHandler, databaseReady)
+	}
+
 	server := &http.Server{
 		Addr:              cfg.ListenAddress,
-		Handler:           api.New(issuer.Issue, logger, cfg.MaxInFlight),
+		Handler:           httpHandler,
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       10 * time.Second,
 		WriteTimeout:      10 * time.Second,
@@ -103,4 +166,52 @@ func run(logger *log.Logger) error {
 		}
 		return nil
 	}
+}
+
+func openPilotDatabase(databaseURL string) (*sql.DB, error) {
+	if err := validateDatabaseTransport(databaseURL); err != nil {
+		return nil, err
+	}
+	database, err := sql.Open("pgx", databaseURL)
+	if err != nil {
+		return nil, fmt.Errorf("open pilot database: %w", err)
+	}
+	database.SetMaxOpenConns(5)
+	database.SetMaxIdleConns(2)
+	database.SetConnMaxIdleTime(5 * time.Minute)
+	database.SetConnMaxLifetime(30 * time.Minute)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := database.PingContext(ctx); err != nil {
+		_ = database.Close()
+		return nil, fmt.Errorf("connect pilot database: %w", err)
+	}
+	return database, nil
+}
+
+func validateDatabaseTransport(databaseURL string) error {
+	connectionConfig, err := pgx.ParseConfig(databaseURL)
+	if err != nil {
+		return errors.New("invalid DATABASE_URL")
+	}
+	if !secureDatabaseEndpoint(connectionConfig.Host, connectionConfig.TLSConfig) {
+		return errors.New("remote PostgreSQL connections require certificate-verified TLS without a plaintext fallback")
+	}
+	for _, fallback := range connectionConfig.Fallbacks {
+		if !secureDatabaseEndpoint(fallback.Host, fallback.TLSConfig) {
+			return errors.New("remote PostgreSQL connections require certificate-verified TLS without a plaintext fallback")
+		}
+	}
+	return nil
+}
+
+func secureDatabaseEndpoint(host string, tlsConfig *tls.Config) bool {
+	if strings.HasPrefix(host, "/") || strings.EqualFold(host, "localhost") {
+		return true
+	}
+	ip := net.ParseIP(host)
+	if ip != nil && ip.IsLoopback() {
+		return true
+	}
+	return tlsConfig != nil && !tlsConfig.InsecureSkipVerify && tlsConfig.ServerName != ""
 }

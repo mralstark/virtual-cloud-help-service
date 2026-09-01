@@ -1,100 +1,95 @@
 # Runbook: Timeweb Frankfurt pilot demonstration
 
-## Purpose and claim boundary
+## Claim boundary
 
-The pilot demonstrates recovery from common protocol and DPI interference using a
-single Timeweb Frankfurt node. It does not claim to reach that node through a
-strict destination allowlist unless the customer or network operator explicitly
-allows the pilot IP or domain.
+The demonstration uses one Timeweb node and the official AmneziaVPN client. It
+tests AmneziaWG 3.1 and XRay VLESS Reality independently. It does not claim that a
+server can be reached through a strict destination allowlist unless the customer
+or network operator explicitly approves that server IP/domain. It does not use a
+custom client, custom VPN engine, automatic IP rotation, or undocumented Amnezia
+container mutation.
 
 ## Required inputs
 
-- a Timeweb account with a reviewed balance and spending owner;
-- an existing, dedicated Timeweb project;
-- a short-lived API token scoped to that project, with cloud-server and network
-  management only, supplied as `TWC_TOKEN`;
-- a dedicated Ed25519 SSH public key;
-- the operator's current public IPv4 `/32` for administration;
-- an operator-controlled domain whose A record can be changed for the pilot;
-- written confirmation of whether the customer test network uses protocol
-  filtering, destination blocking, or an approved enterprise allowlist.
+- a visible Timeweb VPS and identified billing owner;
+- an approved maintenance window and current backup;
+- a dedicated Ed25519 SSH key in an ignored local path;
+- the administrator's current IPv4 `/32`;
+- the official AmneziaVPN client version selected for the pilot;
+- written confirmation of which customer networks/platforms may be tested.
 
-Never paste tokens or private keys into tickets, chat, Terraform variables, cloud-init,
-or the repository.
+Tokens, passwords, profiles, QR codes, and private keys must never be pasted into
+tickets, chat, Terraform variables, cloud-init, logs, or this repository.
 
 ## Pre-deployment gate
 
-1. Review the current Timeweb price for the exact `fra-1` configuration and confirm
-   the zone has immediately available capacity rather than a preorder queue.
-   Timeweb's managed cloud-server DDoS option is not available in Frankfurt and
-   must remain disabled. Terraform's resource guard permits at most 2 vCPU, 4 GiB
-   RAM, and 40 GiB disk unless code review explicitly changes it.
-2. Run `terraform init`, `terraform fmt -check`, `terraform validate`, and
-   `terraform plan`. Save no plan file containing sensitive provider values.
-3. Confirm the plan reuses the reviewed project and creates one SSH public key, one
-   server, and one firewall attachment only. It must not create another project.
-4. Obtain explicit approval before `terraform apply`; it creates billable resources.
-5. Confirm the cloud firewall policy in the Timeweb panel. The host nftables policy
-   is DROP and permits SSH only from the configured `/32`, UDP/51820, and TCP/80/443.
+1. Confirm the Timeweb API/panel shows exactly the intended server. If it shows zero
+   servers, stop: documentation and Terraform are not a substitute for a VPS.
+2. Complete the approved read-only inventory and update
+   `docs/pilot/network-plan.md`. Confirm TCP/443 and UDP/585 are free or record the
+   observed replacement ports. Do not replace existing firewall/Docker state.
+3. Confirm current price, balance, capacity, backup cost, deletion protection, and
+   the owner who may approve billable actions.
+4. If a future disposable server is required, run `terraform fmt -check`,
+   `terraform validate`, and `terraform plan` in `infra/timeweb`. Review every
+   resource and the firewall DROP postcondition. `terraform apply` requires a new,
+   explicit approval because it creates paid infrastructure.
+5. Verify SSH key access before disabling any remaining password path. Do not lock
+   out the official installer or operator.
 
-## Deployment phases
+## Phase A — inventory and backup
 
-### Phase A — hardened host
+- Capture OS/kernel, uptime, memory, disks, addresses/routes, listeners, Docker
+  objects, running services, firewall state, PostgreSQL state, and current project
+  services using only read-only commands.
+- Redact addresses and identifiers before committing a sanitized inventory.
+- Take a Timeweb backup/snapshot and an encrypted off-server application backup as
+  described in `docs/runbooks/timeweb-restore.md`.
+- Stop if a listener, firewall rule, database, container, or volume is not understood.
 
-- Apply the reviewed Terraform plan.
-- Confirm the server is in Frankfurt and record its actual provider ASN.
-- Verify cloud-init completed, nftables is active, SSH password login is rejected,
-  and security updates are enabled.
-- Point the pilot domain to the assigned IP only after the host firewall is active.
+## Phase B — official Amnezia installation
 
-### Phase B — pinned data plane
+- Use official AmneziaVPN self-hosted setup. Select the observed AWG UDP port; use
+  Reality TCP/443 only when inventory proves it is available.
+- Do not install the repository's laboratory artifact lock as the pilot data plane.
+- After installation, inventory names, image digests, mounts, published ports,
+  Docker networks, restart policies, and health without inspecting secret values.
+- Create `testdata/amnezia-node-layout.json` only from that sanitized observation.
+  Do not fabricate it before the installation exists.
 
-- Install only reviewed upstream artifacts whose version, download URL, SHA-256,
-  SBOM, and license are recorded in the release manifest.
-- Use unique device credentials. Never reuse a demonstration credential for a real
-  user or another server.
-- Bind the UDP and TCP/443 transports independently. The HTTPS endpoint must use
-  infrastructure and a domain controlled or explicitly authorized by the operator.
-- Keep the Go control plane on a private listener behind the HTTPS edge.
+## Phase C — application layer
 
-### Phase C — signed publication
-
-- Replace every `.invalid` and documentation address in the pilot catalog.
-- Set the actual Timeweb provider ASN and increase the catalog revision.
-- Issue and verify the signed manifest before distributing a client profile.
-- Confirm a client rejects an expired, changed-at-same-version, or improperly signed
-  manifest.
+- Apply PostgreSQL migrations 000001–000003 in order using a migration identity;
+  run the service with a restricted application role.
+- Keep PostgreSQL, the admin API, node exporter, and the Go backend on
+  loopback/private listeners. Put only an explicitly required public HTTP route
+  behind a reviewed TLS proxy.
+- Register each manually issued tester access with an opaque reference and expiry;
+  never send the connection profile or private key to the backend.
+- Verify `/healthz`, `/readyz`, signed-manifest policy, admin authentication, and
+  the privacy-safe report before distributing access.
 
 ## Demonstration matrix
 
-1. **Baseline:** both transports complete protected DNS, upload, download, and route
-   confirmation.
-2. **UDP unavailable:** block UDP in the test network; the client cools the UDP path
-   and succeeds over TCP/443.
-3. **Handshake-only stall:** permit setup but drop transfer after the handshake; the
-   client reports `transfer`, not healthy.
-4. **DNS interference:** poison or deny the ordinary resolver; protected resolution
-   must succeed after the tunnel is established without leaking to the default path.
-5. **Destination block:** deny the pilot IP; the client fails closed and applies a
-   bounded cooldown.
-6. **Strict allowlist:** keep an explicitly approved witness reachable while the
-   pilot destination is not. Report `suspected-allowlist`, explain that this is a
-   conservative inference, and do not spray alternate addresses.
-7. **Approved allowlist:** repeat only after the customer/operator adds the pilot
-   destination; record the approval and demonstrate the same transfer checks.
+Run the sequence in `docs/runbooks/pilot-vpn-not-working.md` once with AmneziaWG
+selected and once with Reality selected:
 
-## Acceptance criteria
+1. connect;
+2. DNS through the VPN;
+3. HTTPS through the VPN;
+4. bounded upload;
+5. bounded download;
+6. IPv4 and IPv6 leak checks;
+7. disconnect/reconnect;
+8. revoke one tester without affecting the others.
 
-- no DNS, IPv4, or IPv6 traffic escapes the protected route while connected;
-- a path is never marked healthy before at least 64 KiB succeeds in each direction;
-- UDP failure falls back without user action and without unbounded parallel probes;
-- a suspected allowlist enters a 15-minute-to-6-hour exponential cooldown;
-- service removal revokes demonstration credentials and destroys the billable node;
-- logs contain no browsing destinations, DNS queries, packet contents, SNI, tokens,
-  private keys, or full client addresses.
+Record only the bounded result fields through `POST /admin/pilot/test-results`.
+Changing ports, blocking protocols, or rebooting services is a separately approved
+change test, not part of initial validation.
 
 ## Stop conditions
 
-Stop the demonstration on a traffic leak, signing-state error, unreviewed binary,
-unexpected Terraform resource, unexpected charge, provider abuse alert, or inability
-to revoke the demonstration device independently.
+Stop on a traffic leak, signing-state error, unexpected listener/container/charge,
+unreviewed binary, failed backup, inability to revoke one tester, or any need to
+print a secret for diagnosis. Preserve evidence first; do not reset firewalls,
+prune Docker, recreate containers, or destroy the node as a troubleshooting step.

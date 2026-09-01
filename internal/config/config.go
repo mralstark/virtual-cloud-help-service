@@ -3,6 +3,7 @@ package config
 import (
 	"errors"
 	"fmt"
+	"net"
 	"os"
 	"strconv"
 	"strings"
@@ -29,6 +30,9 @@ type Config struct {
 	ManifestCache   time.Duration
 	Shutdown        time.Duration
 	MaxInFlight     int
+	DatabaseURL     string
+	PilotAdminToken string
+	PilotAccess     bool
 }
 
 func Load() (Config, error) {
@@ -73,6 +77,8 @@ func Load() (Config, error) {
 		ManifestCache:   manifestCache,
 		Shutdown:        shutdown,
 		MaxInFlight:     maxInFlight,
+		DatabaseURL:     strings.TrimSpace(os.Getenv("DATABASE_URL")),
+		PilotAdminToken: strings.TrimSpace(os.Getenv("PILOT_ADMIN_TOKEN")),
 	}
 	if result.SigningKeyPath == "" {
 		return Config{}, errors.New("MANIFEST_SIGNING_KEY_PATH is required")
@@ -86,7 +92,35 @@ func Load() (Config, error) {
 	if result.IssuerStatePath == "" {
 		return Config{}, errors.New("MANIFEST_STATE_PATH is required and must be on durable storage")
 	}
+	if (result.DatabaseURL == "") != (result.PilotAdminToken == "") {
+		return Config{}, errors.New("DATABASE_URL and PILOT_ADMIN_TOKEN must be set together")
+	}
+	if len(result.DatabaseURL) > 2048 {
+		return Config{}, errors.New("DATABASE_URL is too long")
+	}
+	if result.PilotAdminToken != "" && (len(result.PilotAdminToken) < 32 || len(result.PilotAdminToken) > 512) {
+		return Config{}, errors.New("PILOT_ADMIN_TOKEN must contain between 32 and 512 bytes")
+	}
+	if strings.Contains(strings.ToLower(result.PilotAdminToken), "replace-with") {
+		return Config{}, errors.New("PILOT_ADMIN_TOKEN still contains the example placeholder")
+	}
+	result.PilotAccess = result.DatabaseURL != ""
+	if result.PilotAccess && !isPrivateListener(result.ListenAddress) {
+		return Config{}, errors.New("pilot admin API requires a literal loopback or private LISTEN_ADDRESS")
+	}
 	return result, nil
+}
+
+func isPrivateListener(address string) bool {
+	host, _, err := net.SplitHostPort(address)
+	if err != nil {
+		return false
+	}
+	if strings.EqualFold(host, "localhost") {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && !ip.IsUnspecified() && (ip.IsLoopback() || ip.IsPrivate())
 }
 
 func integerFromEnvironment(name string, fallback int) (int, error) {

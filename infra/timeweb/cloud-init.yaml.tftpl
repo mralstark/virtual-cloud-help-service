@@ -1,0 +1,86 @@
+#cloud-config
+package_update: true
+package_upgrade: false
+ssh_pwauth: false
+packages:
+  - ca-certificates
+  - curl
+  - docker.io
+  - nftables
+  - fail2ban
+  - prometheus-node-exporter
+  - unattended-upgrades
+
+users:
+  - default
+  - name: acvpn
+    gecos: ACVPN pilot operator
+    groups: [sudo]
+    shell: /bin/bash
+    lock_passwd: true
+    sudo: ALL=(ALL) NOPASSWD:ALL
+    ssh_authorized_keys:
+      - ${ssh_public_key}
+
+write_files:
+  - path: /etc/ssh/sshd_config.d/60-acvpn-hardening.conf
+    owner: root:root
+    permissions: "0644"
+    content: |
+      PasswordAuthentication no
+      KbdInteractiveAuthentication no
+      PermitRootLogin prohibit-password
+      AllowTcpForwarding no
+      X11Forwarding no
+      PermitTunnel no
+      MaxAuthTries 3
+  - path: /etc/nftables.d/acvpn-host.nft
+    owner: root:root
+    permissions: "0600"
+    content: |
+      table inet acvpn_host {
+        chain input {
+          type filter hook input priority filter; policy drop;
+          ct state invalid drop
+          ct state established,related accept
+          iifname "lo" accept
+          ip protocol icmp limit rate 10/second accept
+          ip6 nexthdr ipv6-icmp limit rate 10/second accept
+          ip saddr ${admin_cidr} tcp dport 22 ct state new limit rate 6/minute accept
+          udp dport ${awg_port} accept
+          tcp dport ${reality_port} accept
+        }
+      }
+  - path: /etc/nftables.conf
+    owner: root:root
+    permissions: "0600"
+    content: |
+      include "/etc/nftables.d/*.nft"
+  - path: /etc/fail2ban/jail.d/sshd.local
+    owner: root:root
+    permissions: "0644"
+    content: |
+      [sshd]
+      enabled = true
+      maxretry = 3
+      findtime = 10m
+      bantime = 1h
+  - path: /etc/default/prometheus-node-exporter
+    owner: root:root
+    permissions: "0644"
+    content: |
+      ARGS="--web.listen-address=127.0.0.1:9100"
+
+runcmd:
+  - [usermod, -aG, docker, acvpn]
+  - [sshd, -t]
+  - [systemctl, reload, ssh]
+  - [systemctl, enable, --now, docker]
+  - [systemctl, enable, --now, systemd-timesyncd]
+  - [systemctl, enable, nftables]
+  - [sh, -c, "nft list table inet acvpn_host >/dev/null 2>&1 && nft delete table inet acvpn_host || true"]
+  - [nft, -f, /etc/nftables.conf]
+  - [systemctl, enable, --now, fail2ban]
+  - [systemctl, restart, prometheus-node-exporter]
+
+final_message: "Disposable host bootstrap complete; official Amnezia installation and post-install inventory remain manual gates."
