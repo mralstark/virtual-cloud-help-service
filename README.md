@@ -103,9 +103,14 @@ installs them. See [ADR 0004](docs/adr/0004-pinned-pilot-data-plane.md).
 | `DATABASE_URL` | disabled | PostgreSQL connection for pilot access metadata |
 | `PILOT_ADMIN_TOKEN` | disabled | 32–512 byte bearer token for the loopback/private pilot admin API |
 
-`DATABASE_URL` and `PILOT_ADMIN_TOKEN` must be set together. Apply
-all migrations in numeric order through `migrations/000003_pilot_test_results.sql`
-before enabling them. The service then verifies the schema at startup and exposes:
+`DATABASE_URL` and `PILOT_ADMIN_TOKEN` must be set together. For standard
+PostgreSQL, apply the numeric files through
+`migrations/000003_pilot_test_results.sql`. For Supabase, apply only the
+versioned files under `supabase/migrations/`; they contain the complete schema.
+On Supabase, use a dedicated login that inherits only `vchs_runtime`; on standard
+PostgreSQL, grant an equivalent least-privilege role. The control plane rejects
+privileged database identities. Configure these controls before enabling pilot
+database access. The service then verifies the schema at startup and exposes:
 
 - `POST /admin/pilot/access` to record metadata for access created manually in
   official AmneziaVPN;

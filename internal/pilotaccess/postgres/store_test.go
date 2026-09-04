@@ -43,11 +43,11 @@ func TestCreateAndIdempotentRevoke(t *testing.T) {
 
 	access := postgresTestAccess()
 	mock.ExpectBegin()
-	mock.ExpectQuery(regexp.QuoteMeta("INSERT INTO vpn_accesses")).
+	mock.ExpectQuery(regexp.QuoteMeta("INSERT INTO app_private.vpn_accesses")).
 		WithArgs(access.ID, access.DeviceID, access.NodeID, access.Transport, access.ExternalReference,
 			access.CreatedAt, access.ExpiresAt, access.RevokedAt, access.Status).
 		WillReturnRows(accessRow(access))
-	mock.ExpectExec("INSERT INTO admin_audit_events").
+	mock.ExpectExec("INSERT INTO app_private.admin_audit_events").
 		WithArgs(auditID1, access.ID, access.NodeID, access.Transport, access.ExpiresAt).
 		WillReturnResult(sqlmock.NewResult(1, 1))
 	mock.ExpectCommit()
@@ -64,10 +64,10 @@ func TestCreateAndIdempotentRevoke(t *testing.T) {
 	revoked.Status = pilotaccess.StatusRevoked
 	revoked.RevokedAt = &revokedAt
 	mock.ExpectBegin()
-	mock.ExpectQuery(regexp.QuoteMeta("UPDATE vpn_accesses")).
+	mock.ExpectQuery(regexp.QuoteMeta("UPDATE app_private.vpn_accesses")).
 		WithArgs(access.ID, revokedAt).
 		WillReturnRows(accessRow(revoked))
-	mock.ExpectExec("INSERT INTO admin_audit_events").
+	mock.ExpectExec("INSERT INTO app_private.admin_audit_events").
 		WithArgs(auditID2, access.ID).
 		WillReturnResult(sqlmock.NewResult(1, 1))
 	mock.ExpectCommit()
@@ -95,7 +95,7 @@ func TestCreateClassifiesConstraintErrors(t *testing.T) {
 	}
 	access := postgresTestAccess()
 	mock.ExpectBegin()
-	mock.ExpectQuery("INSERT INTO vpn_accesses").
+	mock.ExpectQuery("INSERT INTO app_private.vpn_accesses").
 		WithArgs(access.ID, access.DeviceID, access.NodeID, access.Transport, access.ExternalReference,
 			access.CreatedAt, access.ExpiresAt, access.RevokedAt, access.Status).
 		WillReturnError(&pgconn.PgError{Code: "23505"})
@@ -119,7 +119,7 @@ func TestRevokeClassifiesMissingAccess(t *testing.T) {
 		t.Fatal(err)
 	}
 	mock.ExpectBegin()
-	mock.ExpectQuery("UPDATE vpn_accesses").WillReturnError(sql.ErrNoRows)
+	mock.ExpectQuery("UPDATE app_private.vpn_accesses").WillReturnError(sql.ErrNoRows)
 	mock.ExpectRollback()
 	if _, err := store.Revoke(context.Background(), "018f5962-9d2a-4ea2-8f6d-9c2e8b6bff11", time.Now()); !errors.Is(err, pilotaccess.ErrNotFound) {
 		t.Fatalf("expected not found, got %v", err)
@@ -141,8 +141,8 @@ func TestCreateRollsBackWhenAuditWriteFails(t *testing.T) {
 	}
 	access := postgresTestAccess()
 	mock.ExpectBegin()
-	mock.ExpectQuery("INSERT INTO vpn_accesses").WillReturnRows(accessRow(access))
-	mock.ExpectExec("INSERT INTO admin_audit_events").WillReturnError(errors.New("audit unavailable"))
+	mock.ExpectQuery("INSERT INTO app_private.vpn_accesses").WillReturnRows(accessRow(access))
+	mock.ExpectExec("INSERT INTO app_private.admin_audit_events").WillReturnError(errors.New("audit unavailable"))
 	mock.ExpectRollback()
 	if _, err := store.Create(context.Background(), access); err == nil {
 		t.Fatal("expected audit failure")

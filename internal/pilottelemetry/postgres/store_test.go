@@ -29,7 +29,10 @@ func TestCreateResult(t *testing.T) {
 		t.Fatal(err)
 	}
 	result := postgresTestResult()
-	mock.ExpectQuery("INSERT INTO pilot_test_results").
+	mock.ExpectExec("DELETE FROM app_private.pilot_test_results").
+		WithArgs(result.RecordedAt.Add(-telemetryRetention)).
+		WillReturnResult(sqlmock.NewResult(0, 0))
+	mock.ExpectQuery("INSERT INTO app_private.pilot_test_results").
 		WithArgs(
 			result.ID, result.DeviceID, result.ClientPlatform, result.ISP, result.Transport,
 			result.OccurredAt, result.Success, result.FailureStage,
@@ -59,9 +62,31 @@ func TestCreateClassifiesConstraintError(t *testing.T) {
 		t.Fatal(err)
 	}
 	result := postgresTestResult()
-	mock.ExpectQuery("INSERT INTO pilot_test_results").WillReturnError(&pgconn.PgError{Code: "23503"})
+	mock.ExpectExec("DELETE FROM app_private.pilot_test_results").
+		WillReturnResult(sqlmock.NewResult(0, 0))
+	mock.ExpectQuery("INSERT INTO app_private.pilot_test_results").WillReturnError(&pgconn.PgError{Code: "23503"})
 	if _, err := store.Create(context.Background(), result); !errors.Is(err, pilottelemetry.ErrInvalid) {
 		t.Fatalf("expected invalid result, got %v", err)
+	}
+}
+
+func TestCreateStopsWhenRetentionFails(t *testing.T) {
+	database, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+	store, err := New(database)
+	if err != nil {
+		t.Fatal(err)
+	}
+	mock.ExpectExec("DELETE FROM app_private.pilot_test_results").
+		WillReturnError(errors.New("retention unavailable"))
+	if _, err := store.Create(context.Background(), postgresTestResult()); err == nil {
+		t.Fatal("expected retention failure")
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
 	}
 }
 

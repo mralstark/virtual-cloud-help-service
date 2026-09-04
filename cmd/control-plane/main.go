@@ -16,7 +16,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
-	_ "github.com/jackc/pgx/v5/stdlib"
+	"github.com/jackc/pgx/v5/stdlib"
 
 	"github.com/mralstark/virtual-cloud-help-service/internal/api"
 	"github.com/mralstark/virtual-cloud-help-service/internal/config"
@@ -169,13 +169,12 @@ func run(logger *log.Logger) error {
 }
 
 func openPilotDatabase(databaseURL string) (*sql.DB, error) {
-	if err := validateDatabaseTransport(databaseURL); err != nil {
+	connectionConfig, err := secureDatabaseConfig(databaseURL)
+	if err != nil {
 		return nil, err
 	}
-	database, err := sql.Open("pgx", databaseURL)
-	if err != nil {
-		return nil, fmt.Errorf("open pilot database: %w", err)
-	}
+	hardenDatabaseConfig(connectionConfig)
+	database := stdlib.OpenDB(*connectionConfig)
 	database.SetMaxOpenConns(5)
 	database.SetMaxIdleConns(2)
 	database.SetConnMaxIdleTime(5 * time.Minute)
@@ -186,23 +185,54 @@ func openPilotDatabase(databaseURL string) (*sql.DB, error) {
 		_ = database.Close()
 		return nil, fmt.Errorf("connect pilot database: %w", err)
 	}
+	if err := validateDatabaseIdentity(ctx, database); err != nil {
+		_ = database.Close()
+		return nil, err
+	}
 	return database, nil
 }
 
+func validateDatabaseIdentity(ctx context.Context, database *sql.DB) error {
+	var superuser, createRole, createDatabase, bypassRLS bool
+	if err := database.QueryRowContext(ctx, `
+		SELECT rolsuper, rolcreaterole, rolcreatedb, rolbypassrls
+		FROM pg_catalog.pg_roles
+		WHERE rolname = current_user`).
+		Scan(&superuser, &createRole, &createDatabase, &bypassRLS); err != nil {
+		return fmt.Errorf("validate pilot database identity: %w", err)
+	}
+	if superuser || createRole || createDatabase || bypassRLS {
+		return errors.New("pilot database identity must not be privileged or bypass row security")
+	}
+	return nil
+}
+
 func validateDatabaseTransport(databaseURL string) error {
+	_, err := secureDatabaseConfig(databaseURL)
+	return err
+}
+
+func hardenDatabaseConfig(config *pgx.ConnConfig) {
+	config.RuntimeParams["search_path"] = "pg_catalog"
+	config.RuntimeParams["statement_timeout"] = "5000"
+	config.RuntimeParams["lock_timeout"] = "2000"
+	config.RuntimeParams["idle_in_transaction_session_timeout"] = "5000"
+}
+
+func secureDatabaseConfig(databaseURL string) (*pgx.ConnConfig, error) {
 	connectionConfig, err := pgx.ParseConfig(databaseURL)
 	if err != nil {
-		return errors.New("invalid DATABASE_URL")
+		return nil, errors.New("invalid DATABASE_URL")
 	}
 	if !secureDatabaseEndpoint(connectionConfig.Host, connectionConfig.TLSConfig) {
-		return errors.New("remote PostgreSQL connections require certificate-verified TLS without a plaintext fallback")
+		return nil, errors.New("remote PostgreSQL connections require certificate-verified TLS without a plaintext fallback")
 	}
 	for _, fallback := range connectionConfig.Fallbacks {
 		if !secureDatabaseEndpoint(fallback.Host, fallback.TLSConfig) {
-			return errors.New("remote PostgreSQL connections require certificate-verified TLS without a plaintext fallback")
+			return nil, errors.New("remote PostgreSQL connections require certificate-verified TLS without a plaintext fallback")
 		}
 	}
-	return nil
+	return connectionConfig, nil
 }
 
 func secureDatabaseEndpoint(host string, tlsConfig *tls.Config) bool {

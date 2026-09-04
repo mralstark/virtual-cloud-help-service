@@ -59,7 +59,9 @@ tickets, chat, Terraform variables, cloud-init, logs, or this repository.
 
 ## Phase C — application layer
 
-- Apply PostgreSQL migrations 000001–000003 in order using a migration identity;
+- For standard PostgreSQL, apply migrations 000001–000003 in order using a
+  migration identity. For Supabase, apply only `supabase/migrations/`, then use
+  a dedicated login with only `vchs_runtime` membership for the service;
   run the service with a restricted application role.
 - Keep PostgreSQL, the admin API, node exporter, and the Go backend on
   loopback/private listeners. Put only an explicitly required public HTTP route

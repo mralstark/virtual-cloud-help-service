@@ -1,6 +1,13 @@
 package main
 
-import "testing"
+import (
+	"context"
+	"database/sql/driver"
+	"errors"
+	"testing"
+
+	"github.com/DATA-DOG/go-sqlmock"
+)
 
 func TestValidateDatabaseTransport(t *testing.T) {
 	tests := []struct {
@@ -25,5 +32,70 @@ func TestValidateDatabaseTransport(t *testing.T) {
 				t.Fatalf("unexpected failure: %v", err)
 			}
 		})
+	}
+}
+
+func TestSecureDatabaseConfigEnforcesServerSideGuards(t *testing.T) {
+	config, err := secureDatabaseConfig("postgres://user:secret@db.example.com/vchs?sslmode=verify-full&statement_timeout=0&search_path=public")
+	if err != nil {
+		t.Fatal(err)
+	}
+	hardenDatabaseConfig(config)
+	expected := map[string]string{
+		"search_path":                         "pg_catalog",
+		"statement_timeout":                   "5000",
+		"lock_timeout":                        "2000",
+		"idle_in_transaction_session_timeout": "5000",
+	}
+	for key, value := range expected {
+		if config.RuntimeParams[key] != value {
+			t.Fatalf("%s = %q, want %q", key, config.RuntimeParams[key], value)
+		}
+	}
+}
+
+func TestValidateDatabaseIdentity(t *testing.T) {
+	tests := []struct {
+		name       string
+		attributes []driver.Value
+		shouldFail bool
+	}{
+		{name: "least privilege", attributes: []driver.Value{false, false, false, false}},
+		{name: "superuser", attributes: []driver.Value{true, false, false, false}, shouldFail: true},
+		{name: "create role", attributes: []driver.Value{false, true, false, false}, shouldFail: true},
+		{name: "create database", attributes: []driver.Value{false, false, true, false}, shouldFail: true},
+		{name: "bypass RLS", attributes: []driver.Value{false, false, false, true}, shouldFail: true},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			database, mock, err := sqlmock.New()
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer database.Close()
+			mock.ExpectQuery("SELECT rolsuper, rolcreaterole, rolcreatedb, rolbypassrls").
+				WillReturnRows(sqlmock.NewRows([]string{
+					"rolsuper", "rolcreaterole", "rolcreatedb", "rolbypassrls",
+				}).AddRow(test.attributes...))
+			err = validateDatabaseIdentity(context.Background(), database)
+			if test.shouldFail != (err != nil) {
+				t.Fatalf("error = %v, shouldFail = %v", err, test.shouldFail)
+			}
+			if err := mock.ExpectationsWereMet(); err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+}
+
+func TestValidateDatabaseIdentityPropagatesQueryFailure(t *testing.T) {
+	database, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+	mock.ExpectQuery("SELECT rolsuper").WillReturnError(errors.New("database unavailable"))
+	if err := validateDatabaseIdentity(context.Background(), database); err == nil {
+		t.Fatal("expected identity query failure")
 	}
 }
