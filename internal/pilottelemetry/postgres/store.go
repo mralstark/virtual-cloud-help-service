@@ -17,6 +17,8 @@ type Store struct {
 	db *sql.DB
 }
 
+const telemetryRetention = 30 * 24 * time.Hour
+
 func New(db *sql.DB) (*Store, error) {
 	if db == nil {
 		return nil, errors.New("pilot telemetry postgres: database is required")
@@ -29,7 +31,7 @@ func (store *Store) CheckSchema(ctx context.Context) error {
 		SELECT id, device_id, client_platform, isp, transport, occurred_at,
 		       success, failure_stage, connection_time_bucket, throughput_bucket,
 		       recorded_at
-		FROM pilot_test_results
+		FROM app_private.pilot_test_results
 		WHERE false`)
 	if err != nil {
 		return fmt.Errorf("pilot telemetry postgres: check schema: %w", err)
@@ -39,8 +41,8 @@ func (store *Store) CheckSchema(ctx context.Context) error {
 	}
 	joinRows, err := store.db.QueryContext(ctx, `
 		SELECT device.account_id
-		FROM vpn_accesses AS access
-		JOIN devices AS device ON device.id = access.device_id
+		FROM app_private.vpn_accesses AS access
+		JOIN app_private.devices AS device ON device.id = access.device_id
 		WHERE false`)
 	if err != nil {
 		return fmt.Errorf("pilot telemetry postgres: check report schema: %w", err)
@@ -52,8 +54,19 @@ func (store *Store) CheckSchema(ctx context.Context) error {
 }
 
 func (store *Store) Create(ctx context.Context, result pilottelemetry.TestResult) (pilottelemetry.TestResult, error) {
+	if _, err := store.db.ExecContext(ctx, `
+		DELETE FROM app_private.pilot_test_results
+		WHERE id IN (
+			SELECT id
+			FROM app_private.pilot_test_results
+			WHERE occurred_at < $1
+			ORDER BY occurred_at
+			LIMIT 1000
+		)`, result.RecordedAt.Add(-telemetryRetention)); err != nil {
+		return pilottelemetry.TestResult{}, fmt.Errorf("pilot telemetry postgres: enforce retention: %w", err)
+	}
 	row := store.db.QueryRowContext(ctx, `
-		INSERT INTO pilot_test_results (
+		INSERT INTO app_private.pilot_test_results (
 			id, device_id, client_platform, isp, transport, occurred_at,
 			success, failure_stage, connection_time_bucket, throughput_bucket,
 			recorded_at
@@ -86,7 +99,8 @@ func (store *Store) Aggregate(ctx context.Context, at time.Time) (aggregate pilo
 	transportRows, err := transaction.QueryContext(ctx, `
 		SELECT transport, count(*)::bigint,
 		       count(*) FILTER (WHERE success)::bigint
-		FROM pilot_test_results
+		FROM app_private.pilot_test_results
+		WHERE occurred_at >= current_timestamp - interval '30 days'
 		GROUP BY transport
 		ORDER BY transport`)
 	if err != nil {
@@ -112,8 +126,9 @@ func (store *Store) Aggregate(ctx context.Context, at time.Time) (aggregate pilo
 
 	failureRows, err := transaction.QueryContext(ctx, `
 		SELECT failure_stage, count(*)::bigint
-		FROM pilot_test_results
+		FROM app_private.pilot_test_results
 		WHERE success = false
+		  AND occurred_at >= current_timestamp - interval '30 days'
 		GROUP BY failure_stage
 		ORDER BY failure_stage`)
 	if err != nil {
@@ -139,8 +154,9 @@ func (store *Store) Aggregate(ctx context.Context, at time.Time) (aggregate pilo
 
 	ispRows, err := transaction.QueryContext(ctx, `
 		SELECT isp, count(*)::bigint
-		FROM pilot_test_results
+		FROM app_private.pilot_test_results
 		WHERE success = false AND isp IS NOT NULL
+		  AND occurred_at >= current_timestamp - interval '30 days'
 		GROUP BY isp
 		HAVING count(*) >= 2
 		ORDER BY count(*) DESC, isp
@@ -167,8 +183,8 @@ func (store *Store) Aggregate(ctx context.Context, at time.Time) (aggregate pilo
 	if err := transaction.QueryRowContext(ctx, `
 		SELECT count(DISTINCT access.device_id)::bigint,
 		       count(DISTINCT device.account_id)::bigint
-		FROM vpn_accesses AS access
-		JOIN devices AS device ON device.id = access.device_id
+		FROM app_private.vpn_accesses AS access
+		JOIN app_private.devices AS device ON device.id = access.device_id
 		WHERE access.status = 'active' AND access.expires_at > $1`, at).
 		Scan(&aggregate.ActiveDevices, &aggregate.ActiveUsers); err != nil {
 		return aggregate, fmt.Errorf("pilot telemetry postgres: count active devices: %w", err)
@@ -176,7 +192,8 @@ func (store *Store) Aggregate(ctx context.Context, at time.Time) (aggregate pilo
 	var firstTestAt, lastTestAt sql.NullTime
 	if err := transaction.QueryRowContext(ctx, `
 		SELECT min(occurred_at), max(occurred_at)
-		FROM pilot_test_results`).Scan(&firstTestAt, &lastTestAt); err != nil {
+		FROM app_private.pilot_test_results
+		WHERE occurred_at >= current_timestamp - interval '30 days'`).Scan(&firstTestAt, &lastTestAt); err != nil {
 		return aggregate, fmt.Errorf("pilot telemetry postgres: read test period: %w", err)
 	}
 	if firstTestAt.Valid {

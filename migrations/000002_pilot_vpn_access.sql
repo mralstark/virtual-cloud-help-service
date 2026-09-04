@@ -1,9 +1,9 @@
 BEGIN;
 
-CREATE TABLE vpn_accesses (
+CREATE TABLE app_private.vpn_accesses (
     id uuid PRIMARY KEY,
-    device_id uuid NOT NULL REFERENCES devices(id) ON DELETE CASCADE,
-    node_id text NOT NULL REFERENCES nodes(id) ON DELETE RESTRICT,
+    device_id uuid NOT NULL REFERENCES app_private.devices(id) ON DELETE CASCADE,
+    node_id text NOT NULL REFERENCES app_private.nodes(id) ON DELETE RESTRICT,
     transport text NOT NULL CHECK (transport IN ('amneziawg', 'xray_reality')),
     external_reference text NOT NULL CHECK (char_length(external_reference) BETWEEN 1 AND 256),
     created_at timestamptz NOT NULL,
@@ -16,16 +16,18 @@ CREATE TABLE vpn_accesses (
     UNIQUE (node_id, transport, external_reference)
 );
 
-CREATE INDEX vpn_accesses_device_id_idx ON vpn_accesses(device_id);
-CREATE INDEX vpn_accesses_node_status_idx ON vpn_accesses(node_id, status);
+CREATE INDEX vpn_accesses_device_id_idx ON app_private.vpn_accesses(device_id);
+CREATE INDEX vpn_accesses_node_status_idx ON app_private.vpn_accesses(node_id, status);
 CREATE INDEX vpn_accesses_expires_at_idx
-    ON vpn_accesses(expires_at)
+    ON app_private.vpn_accesses(expires_at)
     WHERE status = 'active';
 
-COMMENT ON TABLE vpn_accesses IS
+COMMENT ON TABLE app_private.vpn_accesses IS
     'Operational references to access issued manually through official AmneziaVPN. Never store client private keys or connection profiles.';
 
-COMMENT ON COLUMN vpn_accesses.external_reference IS
+COMMENT ON COLUMN app_private.vpn_accesses.external_reference IS
     'Opaque operator-visible identifier from Amnezia; it must not contain a private key or complete connection profile.';
+
+REVOKE ALL ON app_private.vpn_accesses FROM PUBLIC;
 
 COMMIT;
