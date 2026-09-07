@@ -189,7 +189,37 @@ func openPilotDatabase(databaseURL string) (*sql.DB, error) {
 		_ = database.Close()
 		return nil, err
 	}
+	if err := validateDatabasePrivileges(ctx, database); err != nil {
+		_ = database.Close()
+		return nil, err
+	}
 	return database, nil
+}
+
+// Check each privilege separately: PostgreSQL treats a comma-separated privilege
+// list as ANY, not ALL. Reading an empty table alone does not validate write paths.
+func validateDatabasePrivileges(ctx context.Context, database *sql.DB) error {
+	var allowed bool
+	err := database.QueryRowContext(ctx, `
+		SELECT has_schema_privilege(current_user, 'app_private', 'USAGE')
+		AND bool_and(has_table_privilege(current_user, relation, privilege))
+		FROM (VALUES
+		 ('app_private.devices', 'SELECT'),
+		 ('app_private.vpn_accesses', 'SELECT'),
+		 ('app_private.vpn_accesses', 'INSERT'),
+		 ('app_private.vpn_accesses', 'UPDATE'),
+		 ('app_private.admin_audit_events', 'INSERT'),
+		 ('app_private.pilot_test_results', 'SELECT'),
+		 ('app_private.pilot_test_results', 'INSERT'),
+		 ('app_private.pilot_test_results', 'DELETE')
+		) AS required(relation, privilege)`).Scan(&allowed)
+	if err != nil {
+		return errors.New("pilot database schema/privilege check failed; apply migrations with the migration role")
+	}
+	if !allowed {
+		return errors.New("pilot database login lacks required runtime privileges")
+	}
+	return nil
 }
 
 func validateDatabaseIdentity(ctx context.Context, database *sql.DB) error {

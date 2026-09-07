@@ -1,6 +1,6 @@
 module github.com/mralstark/virtual-cloud-help-service
 
-go 1.27.0
+go 1.27.1
 
 require (
 	github.com/DATA-DOG/go-sqlmock v1.5.2

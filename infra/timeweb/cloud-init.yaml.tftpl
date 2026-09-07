@@ -30,7 +30,9 @@ write_files:
       PasswordAuthentication no
       KbdInteractiveAuthentication no
       PermitRootLogin prohibit-password
-      AllowTcpForwarding no
+      AllowTcpForwarding local
+      PermitOpen 127.0.0.1:8080 127.0.0.1:9100
+      GatewayPorts no
       X11Forwarding no
       PermitTunnel no
       MaxAuthTries 3

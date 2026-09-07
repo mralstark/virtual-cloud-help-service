@@ -75,7 +75,7 @@ func (store *Store) Create(ctx context.Context, access pilotaccess.Access) (pilo
 			id, actor, action, object_type, object_id, metadata
 		) VALUES (
 			$1, 'pilot-admin-api', 'pilot_access_registered', 'vpn_access', $2,
-			jsonb_build_object('node_id', $3, 'transport', $4, 'expires_at', $5)
+			jsonb_build_object('node_id', $3::text, 'transport', $4::text, 'expires_at', $5::timestamptz)
 		)`, auditID, result.ID, result.NodeID, result.Transport, result.ExpiresAt); err != nil {
 		return pilotaccess.Access{}, fmt.Errorf("pilot access postgres: audit create: %w", err)
 	}
@@ -102,6 +102,21 @@ func (store *Store) Revoke(ctx context.Context, id string, at time.Time) (pilota
 		RETURNING id, device_id, node_id, transport, external_reference,
 		          created_at, expires_at, revoked_at, status`, id, at)
 	result, err := scan(row)
+	if errors.Is(err, sql.ErrNoRows) {
+		// A retry after a committed revoke returns the original record without
+		// emitting another audit event. READ COMMITTED also handles concurrent retries.
+		result, err = scan(transaction.QueryRowContext(ctx, `
+			SELECT id, device_id, node_id, transport, external_reference,
+			       created_at, expires_at, revoked_at, status
+			FROM app_private.vpn_accesses WHERE id = $1 AND status = 'revoked'`, id))
+		if err != nil {
+			return pilotaccess.Access{}, classify("revoke", err)
+		}
+		if err := transaction.Commit(); err != nil {
+			return pilotaccess.Access{}, fmt.Errorf("pilot access postgres: commit revoke retry: %w", err)
+		}
+		return result, nil
+	}
 	if err != nil {
 		return pilotaccess.Access{}, classify("revoke", err)
 	}

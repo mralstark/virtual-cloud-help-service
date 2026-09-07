@@ -1,0 +1,36 @@
+[Unit]
+Description=ACVPN pilot control plane
+After=network-online.target
+Wants=network-online.target
+StartLimitIntervalSec=60
+StartLimitBurst=3
+
+[Service]
+Type=simple
+User=acvpn-service
+Group=acvpn-service
+WorkingDirectory=/opt/acvpn
+EnvironmentFile=/etc/acvpn/control-plane.env
+ExecStart=/opt/acvpn/bin/control-plane
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=15
+StateDirectory=acvpn
+StateDirectoryMode=0700
+UMask=0077
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+CapabilityBoundingSet=
+MemoryMax=256M
+TasksMax=64
+
+[Install]
+WantedBy=multi-user.target
