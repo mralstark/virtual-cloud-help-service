@@ -62,6 +62,7 @@ func (store *Store) Create(ctx context.Context, result pilottelemetry.TestResult
 			WHERE occurred_at < $1
 			ORDER BY occurred_at
 			LIMIT 1000
+			FOR UPDATE SKIP LOCKED
 		)`, result.RecordedAt.Add(-telemetryRetention)); err != nil {
 		return pilottelemetry.TestResult{}, fmt.Errorf("pilot telemetry postgres: enforce retention: %w", err)
 	}

@@ -31,6 +31,25 @@ begin
         raise exception 'vchs_runtime privileges do not match the least-privilege contract';
     end if;
 
+    -- A comma-separated privilege string means ANY privilege in PostgreSQL.
+    -- Assert every required privilege individually so missing writes cannot hide
+    -- behind SELECT. The legacy combined check above also verifies forbidden rights.
+    if exists (
+        select 1 from (values
+            ('app_private.devices', 'SELECT'),
+            ('app_private.vpn_accesses', 'SELECT'),
+            ('app_private.vpn_accesses', 'INSERT'),
+            ('app_private.vpn_accesses', 'UPDATE'),
+            ('app_private.admin_audit_events', 'INSERT'),
+            ('app_private.pilot_test_results', 'SELECT'),
+            ('app_private.pilot_test_results', 'INSERT'),
+            ('app_private.pilot_test_results', 'DELETE')
+        ) required(relation, privilege)
+        where not has_table_privilege('vchs_runtime', relation, privilege)
+    ) then
+        raise exception 'vchs_runtime is missing a required individual privilege';
+    end if;
+
     if exists (
         select 1 from pg_roles
         where rolname = 'vchs_runtime'

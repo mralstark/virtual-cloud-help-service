@@ -14,7 +14,7 @@ privacy-safe fields defined by `pilot_test_results`.
   and server image versions are recorded without secrets.
 - TCP/443 and the observed AWG UDP port do not conflict with the backend, SSH, or
   reverse proxy.
-- Standard PostgreSQL has migrations 000001 through 000003 applied. Supabase
+- Standard PostgreSQL has migrations 000001 through 000004 applied. Supabase
   instead has every version under `supabase/migrations/` applied. In both cases
   the service login is unprivileged; on Supabase it inherits only
   `vchs_runtime`.

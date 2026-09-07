@@ -120,6 +120,7 @@ func TestRevokeClassifiesMissingAccess(t *testing.T) {
 	}
 	mock.ExpectBegin()
 	mock.ExpectQuery("UPDATE app_private.vpn_accesses").WillReturnError(sql.ErrNoRows)
+	mock.ExpectQuery("SELECT id, device_id").WillReturnError(sql.ErrNoRows)
 	mock.ExpectRollback()
 	if _, err := store.Revoke(context.Background(), "018f5962-9d2a-4ea2-8f6d-9c2e8b6bff11", time.Now()); !errors.Is(err, pilotaccess.ErrNotFound) {
 		t.Fatalf("expected not found, got %v", err)

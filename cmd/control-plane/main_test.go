@@ -99,3 +99,21 @@ func TestValidateDatabaseIdentityPropagatesQueryFailure(t *testing.T) {
 		t.Fatal("expected identity query failure")
 	}
 }
+
+func TestValidateDatabasePrivileges(t *testing.T) {
+	for _, allowed := range []bool{true, false} {
+		database, mock, err := sqlmock.New()
+		if err != nil {
+			t.Fatal(err)
+		}
+		mock.ExpectQuery("SELECT has_schema_privilege").WillReturnRows(sqlmock.NewRows([]string{"allowed"}).AddRow(allowed))
+		err = validateDatabasePrivileges(context.Background(), database)
+		if (err == nil) != allowed {
+			t.Fatalf("allowed=%v, err=%v", allowed, err)
+		}
+		if err := mock.ExpectationsWereMet(); err != nil {
+			t.Fatal(err)
+		}
+		database.Close()
+	}
+}
