@@ -22,7 +22,9 @@ case "${1:-}" in
     export MANIFEST_STATE_PATH=.local/issuer-state.json
     export MANIFEST_CATALOG_PATH="${MANIFEST_CATALOG_PATH:-.local/nodes.json}"
     export LISTEN_ADDRESS="${LISTEN_ADDRESS:-127.0.0.1:8080}"
-    exec go run ./cmd/control-plane
+    mkdir -p bin
+    go build -o bin/control-plane ./cmd/control-plane
+    exec ./bin/control-plane
     ;;
   *) echo 'Usage: bash scripts/dev.sh init|run' >&2; exit 2 ;;
 esac

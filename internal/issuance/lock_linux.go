@@ -28,7 +28,13 @@ func AcquireProcessLock(statePath string) (*ProcessLock, error) {
 	if err := checkDirectory(directory); err != nil {
 		return nil, err
 	}
-	file, err := os.OpenFile(statePath+".lock", os.O_CREATE|os.O_RDWR, 0o600)
+	root, err := os.OpenRoot(directory)
+	if err != nil {
+		return nil, fmt.Errorf("open issuer state directory: %w", err)
+	}
+	defer root.Close()
+	// Never follow a substituted lock symlink or block opening a FIFO.
+	file, err := root.OpenFile(filepath.Base(statePath)+".lock", os.O_CREATE|os.O_RDWR|syscall.O_NOFOLLOW|syscall.O_NONBLOCK, 0o600)
 	if err != nil {
 		return nil, fmt.Errorf("open issuer process lock: %w", err)
 	}

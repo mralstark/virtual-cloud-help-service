@@ -33,6 +33,8 @@ jobs:
         run: go run golang.org/x/vuln/cmd/govulncheck@v1.7.0 ./...
       - name: Build commands
         run: go build -trimpath ./cmd/...
+      - name: Development startup and restart
+        run: bash scripts/smoke.sh
       - name: Build pinned container
         run: docker build --pull=false .
 
