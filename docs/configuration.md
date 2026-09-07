@@ -56,7 +56,7 @@ Registration requires account, device and node records to exist. Enroll these
 through the operator's database workflow; runtime intentionally cannot create
 accounts/nodes. Never submit VPN private keys or full connection profiles.
 
-Each telemetry write deletes up to 1,000 expired rows, skipping locked rows.
+Each telemetry write deletes up to 1,000 expired rows under a bounded lock timeout.
 Reports exclude older records even while idle. Without new writes, physical
 deletion requires scheduled operator cleanup: this is not a strict wall-clock
 deletion guarantee.
